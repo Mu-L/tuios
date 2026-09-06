@@ -38,11 +38,11 @@ func (g clientGlobals) install() {
 // canary: if any layout path still reads the globals, the disagreeing tests
 // below see the resizes come back.
 func routeSide(ex *exchange, c *session.TUIClient, m *OS, label string, g clientGlobals) {
-	c.OnStateSync(func(state *session.SessionState, _, _ string) {
+	c.OnStateSync(func(state *session.SessionState, _, sourceID string) {
 		ex.enqueue(func() {
 			ex.n++
 			g.install()
-			if err := m.ApplyStateSync(state); err != nil {
+			if err := m.ApplyStateSyncFrom(state, sourceID); err != nil {
 				ex.t.Errorf("%s: apply state sync: %v", label, err)
 			}
 		})

@@ -93,7 +93,7 @@ drain:
 	for {
 		select {
 		case s := <-m.StateSyncChan:
-			got = append(got, s.MasterRatio)
+			got = append(got, s.State.MasterRatio)
 		default:
 			break drain
 		}

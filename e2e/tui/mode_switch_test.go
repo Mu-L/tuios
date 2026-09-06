@@ -1,6 +1,7 @@
 package tuie2e
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -315,5 +316,45 @@ func TestAPeerSeesTilingTurnOff(t *testing.T) {
 	time.Sleep(time.Second)
 	if n := len(paneStarts(peer.Screen())); n != 2 {
 		t.Errorf("the peer went back to %d pane corners\n%s", n, peer.Snapshot())
+	}
+}
+
+// TestAPeerSeesTilingTurnOn is the other direction, and the one that used to
+// fail: a peer that attached while tiling was off holds no tree, and the tree
+// the first client builds when it turns tiling on arrives in a client push,
+// which is not a newer daemon state. The peer adopted the rectangles and the
+// flag, and without a tree it could not place the dividers, so it drew a box
+// around each borderless rectangle with the divider's column left blank.
+//
+// NEGATIVE CONTROL: measured on the tree before the fix, the peer never gives
+// up its two pane corners.
+func TestAPeerSeesTilingTurnOn(t *testing.T) {
+	base := t.TempDir()
+	writeConfig(t, base, "[startup]\nopen_default_window = true\ntiled = false\nlayout = \"bsp\"\n[appearance]\nshared_borders = true\n")
+	term := startIn(t, base, startOpts{cols: 120, rows: 40, args: []string{"new", "peer-on"}})
+	waitWindowCount(t, term, 1, "first pane")
+	newWindow(t, term)
+	waitWindowCount(t, term, 2, "second pane")
+	peer := attachIn(t, base, "peer-on", startOpts{cols: 120, rows: 40})
+	if err := peer.WaitFor(func(s tuitest.Screen) bool {
+		return countWindows(s) == 2
+	}, uiTimeout); err != nil {
+		t.Fatalf("the peer never showed both panes: %v\n%s", err, peer.Snapshot())
+	}
+	if err := term.SendKeys("t"); err != nil {
+		t.Fatal(err)
+	}
+	if err := term.WaitForText("Tiling on", uiTimeout); err != nil {
+		t.Fatalf("tiling never turned on: %v\n%s", err, term.Snapshot())
+	}
+	waitPaneCorners(t, term, 0, "the client that turned tiling on")
+	waitPaneCorners(t, peer, 0, "the peer")
+	// And it stays that way through the pushes that follow.
+	time.Sleep(time.Second)
+	if n := len(paneStarts(peer.Screen())); n != 0 {
+		t.Errorf("the peer went back to %d pane corners\n%s", n, peer.Snapshot())
+	}
+	if local, remote := paneStarts(term.Screen()), paneStarts(peer.Screen()); fmt.Sprint(local) != fmt.Sprint(remote) {
+		t.Errorf("the two clients draw different layouts:\n local %v\n peer  %v\n%s\n%s", local, remote, term.Snapshot(), peer.Snapshot())
 	}
 }

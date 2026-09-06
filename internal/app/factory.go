@@ -135,7 +135,7 @@ func NewOS(opts OSOptions) *OS {
 		FocusedWindow:   -1,
 		WindowExitChan:  make(chan string, 10),
 		PTYDataChan:     make(chan struct{}, 1),
-		StateSyncChan:   make(chan *session.SessionState, 10),
+		StateSyncChan:   make(chan StateSyncMsg, 10),
 		ClientEventChan: make(chan ClientEvent, 10),
 		// The two daemon events that end this client. Made here rather than on
 		// first use because the SSH and web hosts write to it from the daemon

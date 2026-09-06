@@ -356,11 +356,11 @@ func newFleet(t *testing.T, seed uint64) *fleet {
 // changed what this client keeps; a session resize goes through Update, which
 // re-lays the panes out and announces in its turn.
 func (f *fleet) route(fc *fleetClient) {
-	fc.c.OnStateSync(func(state *session.SessionState, trigger, _ string) {
+	fc.c.OnStateSync(func(state *session.SessionState, trigger, sourceID string) {
 		f.ex.enqueue(func() {
 			f.ex.n++
 			fc.g.install()
-			if err := fc.m.ApplyStateSync(state); err != nil {
+			if err := fc.m.ApplyStateSyncFrom(state, sourceID); err != nil {
 				f.t.Errorf("client %s: apply state sync: %v", fc.name, err)
 			}
 			fc.m.AnnounceLayoutReserve()

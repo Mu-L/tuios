@@ -1,9 +1,9 @@
 package app
 
-import "github.com/Gaurav-Gosain/tuios/internal/session"
-
 // QueueStateSync hands a state snapshot from the daemon read loop to the Update
-// loop. When the channel is full it displaces the oldest queued snapshot rather
+// loop, together with where it came from: the daemon itself, or the peer whose
+// push it is. ApplyStateSync reads the origin to tell a peer's tiling topology,
+// which is news, from an echo of this client's own. When the channel is full it displaces the oldest queued snapshot rather
 // than discarding the new one, and reports that it did so.
 //
 // Every message here is a whole snapshot, so losing an intermediate costs
@@ -23,12 +23,12 @@ import "github.com/Gaurav-Gosain/tuios/internal/session"
 //
 // The read loop is the only sender, so freeing a slot here guarantees the retry
 // takes it.
-func (m *OS) QueueStateSync(state *session.SessionState) (displaced bool) {
-	if m.StateSyncChan == nil || state == nil {
+func (m *OS) QueueStateSync(sync StateSyncMsg) (displaced bool) {
+	if m.StateSyncChan == nil || sync.State == nil {
 		return false
 	}
 	select {
-	case m.StateSyncChan <- state:
+	case m.StateSyncChan <- sync:
 		return false
 	default:
 	}
@@ -37,7 +37,7 @@ func (m *OS) QueueStateSync(state *session.SessionState) (displaced bool) {
 	default:
 	}
 	select {
-	case m.StateSyncChan <- state:
+	case m.StateSyncChan <- sync:
 	default:
 	}
 	return true

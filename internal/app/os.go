@@ -157,13 +157,13 @@ type OS struct {
 	LastMouseX      int
 	LastMouseY      int
 	ShowHelp        bool
-	InteractionMode bool                       // True when actively dragging/resizing
-	MouseSnapping   bool                       // Enable/disable mouse snapping
-	WindowExitChan  chan string                // Channel to signal window closure
-	windowExits     windowExitQueue            // Overflow for exits WindowExitChan could not take
-	PTYDataChan     chan struct{}              // Signaled by PTY readers when new output arrives (buffered 1, coalescing)
-	StateSyncChan   chan *session.SessionState // Channel for thread-safe state sync from callbacks
-	ClientEventChan chan ClientEvent           // Channel for thread-safe client join/leave notifications
+	InteractionMode bool              // True when actively dragging/resizing
+	MouseSnapping   bool              // Enable/disable mouse snapping
+	WindowExitChan  chan string       // Channel to signal window closure
+	windowExits     windowExitQueue   // Overflow for exits WindowExitChan could not take
+	PTYDataChan     chan struct{}     // Signaled by PTY readers when new output arrives (buffered 1, coalescing)
+	StateSyncChan   chan StateSyncMsg // Channel for thread-safe state sync from callbacks
+	ClientEventChan chan ClientEvent  // Channel for thread-safe client join/leave notifications
 	// DaemonExitChan carries the two daemon events that end this client: the
 	// session was destroyed, or the connection dropped. See daemon_exit.go.
 	DaemonExitChan chan tea.Msg
