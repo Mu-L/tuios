@@ -45,7 +45,10 @@ func TestNotificationLandsInTheDockNotOverAPane(t *testing.T) {
 	newWindow(t, term)
 
 	// Toggling tiling pushes a message the app itself generates, so this does
-	// not depend on a test-only injection path.
+	// not depend on a test-only injection path. Tiling starts off, because
+	// startup.tiled ships on and the message this waits for is the one the key
+	// pushes going the other way.
+	disableTiling(t, term)
 	if err := term.SendKeys("t"); err != nil {
 		t.Fatalf("send 't': %v", err)
 	}
@@ -71,6 +74,7 @@ func TestNotificationDismissesOnEscAndTheKeyStillLands(t *testing.T) {
 	waitBoot(t, term)
 	newWindow(t, term)
 
+	disableTiling(t, term)
 	if err := term.SendKeys("t"); err != nil {
 		t.Fatalf("send 't': %v", err)
 	}
@@ -123,6 +127,7 @@ func TestDockStaysWithinTheScreen(t *testing.T) {
 			term, _ := start(t, startOpts{cols: cols, rows: 30})
 			waitBoot(t, term)
 			newWindow(t, term)
+			disableTiling(t, term)
 			if err := term.SendKeys("t"); err != nil {
 				t.Fatalf("send 't': %v", err)
 			}

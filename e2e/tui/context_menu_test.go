@@ -483,13 +483,7 @@ func TestContextMenuReachesTopWindowRowWithTopDock(t *testing.T) {
 	if err := term.SendKeys("n"); err != nil {
 		t.Fatalf("new window: %v", err)
 	}
-	if err := term.SendKeys("t"); err != nil {
-		t.Fatalf("tile: %v", err)
-	}
-	// Wait for the tiled window's own frame rather than for a window count.
-	if err := term.WaitForText("Tiling on", uiTimeout); err != nil {
-		t.Fatalf("tiling never turned on: %v\n%s", err, term.Snapshot())
-	}
+	enableTiling(t, term)
 	time.Sleep(500 * time.Millisecond)
 
 	// Find the window's top border: the first row below the dock's separator

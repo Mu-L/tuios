@@ -7,15 +7,19 @@ import (
 	toml "github.com/pelletier/go-toml/v2"
 )
 
-// TestStartupConfigDefaults confirms both [startup] options default to false so
-// a fresh install behaves exactly as before: an empty, floating session.
+// TestStartupConfigDefaults pins what a fresh install starts as: a tiled,
+// daemon-backed session that opens no window of its own and starts in window
+// mode. Tiled and daemon are the two that ship on.
 func TestStartupConfigDefaults(t *testing.T) {
 	cfg := config.DefaultConfig()
 	if cfg.Startup.OpenDefaultWindow {
 		t.Error("open_default_window should default to false")
 	}
-	if cfg.Startup.Tiled {
-		t.Error("tiled should default to false")
+	if !cfg.Startup.Tiled {
+		t.Error("tiled should default to true")
+	}
+	if !cfg.Startup.Daemon {
+		t.Error("daemon should default to true")
 	}
 	if cfg.Startup.StartInTerminalMode {
 		t.Error("start_in_terminal_mode should default to false")
@@ -45,19 +49,39 @@ start_in_terminal_mode = true
 	}
 }
 
-// TestStartupConfigAbsentDefaultsFalse confirms that omitting the [startup]
-// section leaves both options false rather than picking up some other value.
-func TestStartupConfigAbsentDefaultsFalse(t *testing.T) {
+// TestAnExistingConfigKeepsTheStartupItWasWritten is the upgrade contract for
+// tiled and daemon, and it is the reason both could be turned on at all.
+//
+// The [startup] booleans have no fill-missing pass, so a file that does not
+// name them reads them as false. That is not an oversight here: it means the
+// two defaults that change what happens the moment tuios starts reach a new
+// install only. Somebody who already has a config file goes on getting the
+// floating, standalone session they had, and the daemon never appears on a
+// machine that was not asked for one.
+//
+// If a fillMissingStartup is ever added, this test fails, and the note in
+// docs/SESSIONS.md stops being true on the same day.
+func TestAnExistingConfigKeepsTheStartupItWasWritten(t *testing.T) {
 	const src = `
 [appearance]
 border_style = "rounded"
 `
-	var cfg config.UserConfig
-	if err := toml.Unmarshal([]byte(src), &cfg); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	cfg, err := config.ParseUserConfig([]byte(src))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
 	}
-	if cfg.Startup.OpenDefaultWindow || cfg.Startup.Tiled || cfg.Startup.StartInTerminalMode {
-		t.Errorf("absent [startup] should leave every option false, got open=%v tiled=%v terminal=%v",
-			cfg.Startup.OpenDefaultWindow, cfg.Startup.Tiled, cfg.Startup.StartInTerminalMode)
+	if cfg.Startup.OpenDefaultWindow || cfg.Startup.Tiled || cfg.Startup.StartInTerminalMode || cfg.Startup.Daemon {
+		t.Errorf("an existing config without [startup] must keep every option off, got open=%v tiled=%v terminal=%v daemon=%v",
+			cfg.Startup.OpenDefaultWindow, cfg.Startup.Tiled, cfg.Startup.StartInTerminalMode, cfg.Startup.Daemon)
+	}
+
+	// The appearance half is the opposite, and deliberately so. Those are
+	// strings, so an absent key is told apart from a set one, and the new
+	// window buttons do reach a config file that never named them.
+	if got := cfg.Appearance.WindowButtonStyle; got != config.WindowButtonStyleDots {
+		t.Errorf("window_button_style = %q, want %q from the defaults", got, config.WindowButtonStyleDots)
+	}
+	if got := cfg.Appearance.WindowButtonPosition; got != config.WindowButtonPositionLeft {
+		t.Errorf("window_button_position = %q, want %q from the defaults", got, config.WindowButtonPositionLeft)
 	}
 }

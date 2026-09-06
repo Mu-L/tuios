@@ -97,10 +97,13 @@ tuios [command] [flags]
 
 ### Root Command
 
-Run TUIOS in local mode (default behavior):
+Run TUIOS. A plain `tuios` attaches to a daemon-backed session, because
+`startup.daemon` ships on. Add `--standalone` for a local session that lives and
+dies with this process:
 
 ```bash
 tuios
+tuios --standalone
 ```
 
 **Flags:**
@@ -113,8 +116,8 @@ tuios
 - `--border-style <style>` - Window border style (rounded, normal, thick, double, hidden, block, ascii)
 - `--dockbar-position <pos>` - Dockbar position (bottom, top, hidden)
 - `--hide-window-buttons` - Hide window control buttons (minimize, maximize, close)
-- `--window-button-style <style>` - How the window controls are drawn: `pill` (default) or `dots` (macOS traffic lights)
-- `--window-button-position <position>` - Which end of the title bar the window controls sit on: `right` (default) or `left` (macOS)
+- `--window-button-style <style>` - How the window controls are drawn: `dots` (default, macOS traffic lights) or `pill`
+- `--window-button-position <position>` - Which end of the title bar the window controls sit on: `left` (default, macOS) or `right`
 - `--scrollback-lines <num>` - Number of lines in scrollback buffer (100-1000000)
 - `--window-title-position <pos>` - Window title position (bottom, top, hidden)
 - `--hide-clock` - Hide the clock overlay

@@ -119,15 +119,27 @@ func runLocal() error {
 
 	userConfig := loadAndApplyConfig()
 
-	// A user who always wants the daemon should not have to type "tuios attach"
-	// every time. The decision sits here, after the config is loaded and before
-	// anything has drawn, so the standalone path is never half-entered.
+	// A session should outlive the terminal window it was started in, without
+	// anybody typing "tuios attach" every time. The decision sits here, after
+	// the config is loaded and before anything has drawn, so neither path is
+	// ever half-entered.
 	//
 	// It affects bare "tuios" only. Every subcommand already says which mode it
 	// wants, and a session already running is a separate process this cannot
-	// reach, so turning the setting on never disturbs one.
+	// reach, so the setting never disturbs one.
 	if useDaemonByDefault(userConfig) {
-		return runAttach("", true)
+		err := runAttach("", true)
+		// A daemon that will not start must not leave the user with no
+		// terminal. This route was not asked for on the command line: it is
+		// what the shipped default does, so the standalone session it replaced
+		// is still the right answer when the daemon is the thing that is
+		// broken. "tuios attach" keeps reporting the failure, because there the
+		// daemon is what the user asked for.
+		if !errors.Is(err, errDaemonUnreachable) {
+			return err
+		}
+		fmt.Fprintln(os.Stderr, "The TUIOS daemon did not start. This session runs standalone.")
+		fmt.Fprintln(os.Stderr, "Sessions in this window are not saved. Run 'tuios daemon' to see why it fails.")
 	}
 
 	if cpuProfile != "" {

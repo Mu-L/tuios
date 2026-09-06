@@ -87,6 +87,9 @@ func runPaletteRow(t *testing.T, term *tuitest.Terminal, query, row, announces s
 func TestClickingAPaneKeepsTheOthersInOrder(t *testing.T) {
 	term, base := start(t, startOpts{cols: 120, rows: 40, args: []string{"new", "zorder"}})
 	waitBoot(t, term)
+	// Floating, which the session no longer is by default: the whole test is
+	// about the stacking order of panes that overlap, and tiled panes do not.
+	disableTiling(t, term)
 	for _, letter := range []string{"A", "B", "C"} {
 		newWindow(t, term)
 		fillPaneWith(t, term, letter)

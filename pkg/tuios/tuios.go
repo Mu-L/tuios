@@ -187,7 +187,7 @@ func WithWindowButtonStyle(style string) Option {
 }
 
 // WithWindowButtonPosition selects which end of the title bar the window
-// controls sit on: "right" (the default) or "left", the way macOS does it.
+// controls sit on: "left" (the default, the way macOS does it) or "right".
 func WithWindowButtonPosition(position string) Option {
 	return func(o *Options) {
 		o.WindowButtonPosition = position

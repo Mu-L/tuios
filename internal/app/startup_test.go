@@ -160,9 +160,10 @@ func TestStartupTilingRetilesASessionWithAWindow(t *testing.T) {
 	}
 }
 
-// TestStartupTilingLeavesTilingOffWhenUnconfigured is the other half: a user who
-// never asked to start tiled gets a floating session, however it was made.
-func TestStartupTilingLeavesTilingOffWhenUnconfigured(t *testing.T) {
+// TestStartupTilingLeavesTilingOffWhenTurnedOff is the other half: a user who
+// set [startup] tiled = false gets a floating session, however it was made.
+// Tiled ships on, so this is now the opt-out rather than the shipped state.
+func TestStartupTilingLeavesTilingOffWhenTurnedOff(t *testing.T) {
 	m := newStartupOS(t, false, false)
 	defer closeWindows(m)
 

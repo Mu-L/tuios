@@ -83,11 +83,15 @@ type DebugConfig struct {
 }
 
 // StartupConfig holds settings that only take effect when a session starts.
-// Both default to false so a fresh install behaves exactly as before: the
-// session comes up empty and floating, and the user opens the first window.
+//
+// Tiled and Daemon ship on: a fresh install comes up tiled, in a daemon-backed
+// session, on an empty screen the user opens the first window on. The two are
+// booleans with no fill-missing pass, so a config file that does not name them
+// reads them as false and an existing install keeps the floating, standalone
+// session it already had. See TestAnExistingConfigKeepsTheStartupItWasWritten.
 type StartupConfig struct {
 	OpenDefaultWindow   bool `toml:"open_default_window"`    // Open one terminal window automatically when a session starts with none (default: false)
-	Tiled               bool `toml:"tiled"`                  // Start a new session with tiling enabled instead of floating (default: false)
+	Tiled               bool `toml:"tiled"`                  // Start a new session with tiling enabled instead of floating (default: true)
 	StartInTerminalMode bool `toml:"start_in_terminal_mode"` // Start focused in terminal mode so typing goes straight to the shell, when a window is present (default: false)
 	// Layout is the tiling scheme a new session arranges its panes with: bsp,
 	// master-stack or scrolling. It only ever decides where a session starts.
@@ -96,13 +100,14 @@ type StartupConfig struct {
 	// match the config of whoever attached.
 	Layout string `toml:"layout"`
 	// Daemon makes a bare "tuios" attach to a daemon-backed session instead of
-	// running a standalone one, for a user who always wants the daemon and would
-	// otherwise type "tuios attach" every time (default: false).
+	// running a standalone one, so a session survives the terminal window it was
+	// started in without anybody typing "tuios attach" (default: true).
 	//
 	// It changes bare "tuios" and nothing else: every subcommand already says
 	// which it wants, and a session already running is a separate process this
-	// cannot reach. TUIOS_NO_DAEMON=1 and --standalone both override it, so a
-	// daemon that will not start never leaves the user without a way in.
+	// cannot reach. TUIOS_NO_DAEMON=1 and --standalone both override it, and a
+	// bare "tuios" whose daemon will not start runs standalone for that one run
+	// and says so, so this never leaves the user without a terminal.
 	Daemon bool `toml:"daemon"`
 }
 
@@ -158,8 +163,8 @@ type AppearanceConfig struct {
 	ZenMode                  string                  `toml:"zen_mode"`                     // Zen mode: disabled, always, mouse (default: disabled)
 	Links                    string                  `toml:"links"`                        // Links tuios acts on: off, marked, all (default: all)
 	HideWindowButtons        bool                    `toml:"hide_window_buttons"`          // Hide window control buttons (minimize, maximize, close)
-	WindowButtonStyle        string                  `toml:"window_button_style"`          // Window control style: pill, dots (default: pill)
-	WindowButtonPosition     string                  `toml:"window_button_position"`       // Which end of the title bar the window controls sit on: right, left (default: right)
+	WindowButtonStyle        string                  `toml:"window_button_style"`          // Window control style: pill, dots (default: dots)
+	WindowButtonPosition     string                  `toml:"window_button_position"`       // Which end of the title bar the window controls sit on: right, left (default: left)
 	HideScrollbar            bool                    `toml:"hide_scrollbar"`               // Hide the window scrollbar thumb on the border
 	ScrollbackLines          int                     `toml:"scrollback_lines"`             // Number of lines to keep in scrollback buffer (default: 10000, min: 100, max: 1000000)
 	ScrollLines              int                     `toml:"scroll_lines"`                 // Lines scrolled per mouse wheel notch (default: 3, min: 1, max: 50)
@@ -485,8 +490,8 @@ func DefaultConfig() *UserConfig {
 			ZenMode:                  ZenModeDisabled,
 			Links:                    LinksAll,
 			HideWindowButtons:        false,
-			WindowButtonStyle:        WindowButtonStylePill,
-			WindowButtonPosition:     WindowButtonPositionRight,
+			WindowButtonStyle:        WindowButtonStyleDots,
+			WindowButtonPosition:     WindowButtonPositionLeft,
 			ScrollbackLines:          10000,
 			ScrollLines:              3,
 			DockbarPosition:          "bottom",
@@ -512,9 +517,10 @@ func DefaultConfig() *UserConfig {
 		},
 		Startup: StartupConfig{
 			OpenDefaultWindow:   false,
-			Tiled:               false,
+			Tiled:               true,
 			StartInTerminalMode: false,
 			Layout:              LayoutModeBSP,
+			Daemon:              true,
 		},
 		Tape: TapeConfig{
 			Autorun:    TapeAutorunAsk,

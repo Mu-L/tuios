@@ -1790,9 +1790,9 @@ several things at once.
 
 ## A note on the user's setup
 
-A user can set `startup.daemon = true`, which makes a plain `tuios` attach to a
-daemon-backed session instead of running a standalone one. It changes nothing
-about how you drive tuios: what decides whether you have a socket is
-`TUIOS_ENV`, which is what to guard on either way. If you are helping someone
-debug a session that will not start, `tuios --standalone` and `TUIOS_NO_DAEMON=1`
-both bypass that setting for a run and a shell respectively.
+`startup.daemon` ships on, so a plain `tuios` attaches to a daemon-backed
+session. A user can set it to `false` and get a standalone one instead. It
+changes nothing about how you drive tuios: what decides whether you have a
+socket is `TUIOS_ENV`, which is what to guard on either way. If you are helping
+someone debug a session that will not start, `tuios --standalone` and
+`TUIOS_NO_DAEMON=1` both bypass that setting for a run and a shell respectively.

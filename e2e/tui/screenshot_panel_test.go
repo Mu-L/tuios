@@ -55,25 +55,49 @@ func parseShotPlacesAt(stream []byte) []shotPlaceAt {
 // separator out of the same character but mixes a heavy rune into it and runs
 // the whole screen width, so a run of nothing but the light rune, narrower than
 // the screen, is the panel's.
+//
+// It reads a run inside the row rather than the whole row. The row the rule is
+// on also carries whatever the panel is drawn over, and a tiled pane, which is
+// what a session comes up as, puts its own side borders at both ends of every
+// row. Requiring the trimmed row to be nothing but the light rune found the
+// rule only while the panel floated over empty ground.
 func panelRule(t *testing.T, s tuitest.Screen, fromRow, screenWidth int) (row, col, width int) {
 	t.Helper()
 	for y := fromRow; y < fromRow+60; y++ {
-		line := strings.TrimRight(s.Line(y), " ")
-		if line == "" {
-			continue
+		if col, w := longestRuleRun(s.Line(y)); w >= 20 && w < screenWidth {
+			return y, col, w
 		}
-		trimmed := strings.TrimLeft(line, " ")
-		if strings.Count(trimmed, "─") != len([]rune(trimmed)) {
-			continue
-		}
-		w := len([]rune(trimmed))
-		if w < 20 || w >= screenWidth {
-			continue
-		}
-		return y, len([]rune(line)) - w, w
 	}
 	t.Fatalf("no panel footer rule at or below row %d\n%s", fromRow, s.Text())
 	return 0, 0, 0
+}
+
+// longestRuleRun returns where the longest run of the light horizontal rune
+// starts on a row and how long it is, ignoring any run that a box corner opens
+// or closes. That last part is what tells the panel's rule from a pane's own
+// top or bottom border, which is drawn out of the same rune.
+func longestRuleRun(line string) (col, width int) {
+	const rule = '─'
+	opens, closes := "╭╰┌└├┬┴┼", "╮╯┐┘┤┬┴┼"
+	runes := []rune(line)
+	best, bestAt := 0, 0
+	for i := 0; i < len(runes); {
+		if runes[i] != rule {
+			i++
+			continue
+		}
+		j := i
+		for j < len(runes) && runes[j] == rule {
+			j++
+		}
+		bordered := (i > 0 && strings.ContainsRune(opens, runes[i-1])) ||
+			(j < len(runes) && strings.ContainsRune(closes, runes[j]))
+		if !bordered && j-i > best {
+			best, bestAt = j-i, i
+		}
+		i = j
+	}
+	return bestAt, best
 }
 
 // openShotPanel is the whole setup: a graphics client with a known cell size, a
@@ -248,7 +272,7 @@ func TestScreenshotPreviewBodyEndsWithThePicture(t *testing.T) {
 
 	places := parseShotPlacesAt(stream.bytes())
 	pic := places[len(places)-1]
-	ruleRow, _, _ := panelRule(t, term.Screen(), pic.y, 120)
+	ruleRow, ruleCol, ruleWidth := panelRule(t, term.Screen(), pic.y, 120)
 	wantRule := pic.y + pic.rows + 1
 	t.Logf("picture covers rows %d to %d; the panel's footer rule is on row %d, want %d",
 		pic.y, pic.y+pic.rows-1, ruleRow, wantRule)
@@ -258,12 +282,15 @@ func TestScreenshotPreviewBodyEndsWithThePicture(t *testing.T) {
 			"%d rows of the panel below the picture are neither picture nor anything else",
 			pic.y+pic.rows-1, ruleRow-1, ruleRow-wantRule)
 	}
-	// Nothing of the capture is drawn beside the picture either.
+	// Nothing of the capture is drawn beside the picture either. Only the
+	// panel's own columns are read: the rows it covers run on past both of its
+	// edges, and what is out there belongs to whatever the panel is drawn over,
+	// which for a tiled session is a pane and its two side borders.
 	s := term.Screen()
 	for y := pic.y; y < ruleRow; y++ {
-		if line := strings.TrimSpace(s.Line(y)); line != "" {
+		if body := strings.TrimSpace(cropLine(s.Line(y), ruleCol, ruleCol+ruleWidth)); body != "" {
 			t.Errorf("row %d of the panel body carries %q: the capture is being shown as text "+
-				"next to its own picture", y, line)
+				"next to its own picture", y, body)
 		}
 	}
 	alive(t, term, "after a wide short capture")

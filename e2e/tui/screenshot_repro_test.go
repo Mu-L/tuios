@@ -191,9 +191,13 @@ func TestScreenshotRegionDragCapturesTheDraggedRectangle(t *testing.T) {
 	setShotOption(t, term, base, "screenshot.format", "txt")
 	fillPane(t, term, "ROW")
 
-	// A rectangle in the middle of the pane, well clear of the dock and of the
-	// hint strip capture mode draws along the top.
-	const x0, y0, x1, y1 = 12, 8, 72, 20
+	// A rectangle inside the filler, clear of the dock and of the hint strip
+	// capture mode draws along row 0. It has to end above the last filler row:
+	// a capture file has its trailing blank lines trimmed, so a rectangle whose
+	// bottom rows are empty comes back shorter than it was dragged and the row
+	// count below would fail for a reason that is not the mapping. A tiled pane
+	// starts at the top of the screen, so the filler ends around row 13.
+	const x0, y0, x1, y1 = 12, 2, 72, 13
 
 	before := term.Screen()
 	want := make([]string, 0, y1-y0)
@@ -476,7 +480,13 @@ func TestScreenshotTwoCapturesInOneSecondKeepBothFiles(t *testing.T) {
 		}
 	}
 
-	files := shotFiles(t, dir)
+	// Waited for, not read straight after the last preview closed. The panel
+	// opens on the gesture and the file is written by the command that follows,
+	// so the last write is still in flight when the loop ends; a full-screen
+	// pane, which is what a tiled session captures, is enough to lose the race.
+	// The read below is what decides whether two captures overwrote each other,
+	// so it has to run against a settled directory.
+	files := waitForShot(t, term, dir, captures)
 	names := make([]string, len(files))
 	for i, f := range files {
 		names[i] = filepath.Base(f)

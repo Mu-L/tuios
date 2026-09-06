@@ -15,9 +15,17 @@ func TestDaemonByDefaultAndItsOverrides(t *testing.T) {
 	on := config.DefaultConfig()
 	on.Startup.Daemon = true
 
-	t.Run("off by default", func(t *testing.T) {
-		if useDaemonByDefault(config.DefaultConfig()) {
-			t.Error("a fresh config attached to the daemon; standalone is the default")
+	t.Run("on by default", func(t *testing.T) {
+		if !useDaemonByDefault(config.DefaultConfig()) {
+			t.Error("a fresh config ran standalone; the daemon is the default")
+		}
+	})
+
+	t.Run("off when cleared", func(t *testing.T) {
+		off := config.DefaultConfig()
+		off.Startup.Daemon = false
+		if useDaemonByDefault(off) {
+			t.Error("startup.daemon = false did not take effect")
 		}
 	})
 

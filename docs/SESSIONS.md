@@ -1,10 +1,10 @@
 # Sessions
 
-TUIOS runs in one of two modes: a local session that lives and dies with the
-process you started, and a daemon session that lives in a background process and
-survives the client that draws it. This document covers both, what attaching and
-detaching do, and exactly what does and does not come back after each kind of
-interruption.
+TUIOS runs in one of two modes: a daemon session that lives in a background
+process and survives the client that draws it, and a local session that lives
+and dies with the process you started. A plain `tuios` gives you a daemon
+session. This document covers both, what attaching and detaching do, and exactly
+what does and does not come back after each kind of interruption.
 
 > **Note:** `Ctrl+B` is the default leader key throughout. It is configurable via
 > `leader_key`, see [CONFIGURATION.md](CONFIGURATION.md).
@@ -24,21 +24,48 @@ interruption.
 ## Local Sessions
 
 ```bash
-tuios
+tuios --standalone
 ```
 
-Running `tuios` with no subcommand starts a local session. Everything, the
-window manager, the terminal emulators and the shell processes, lives inside
-that one process. No daemon is started, no socket is created and no state is
-written to disk. When the process exits, for any reason, the session is gone:
-there is nothing to attach to and nothing to restore.
+A local session keeps everything, the window manager, the terminal emulators and
+the shell processes, inside one process. No daemon is started, no socket is
+created and no state is written to disk. When the process exits, for any reason,
+the session is gone: there is nothing to attach to and nothing to restore.
 
 Local sessions are the right choice when you want a window manager for the
 lifetime of one terminal window. Everything in this document from
 [Attaching and Detaching](#attaching-and-detaching) onward applies only to
 daemon sessions.
 
+Ask for a local session in one of three ways:
+
+```bash
+tuios --standalone           # this one run
+TUIOS_NO_DAEMON=1 tuios      # every tuios in this shell
+```
+
+```toml
+[startup]
+daemon = false               # every tuios, from the config file
+```
+
+The flag and the environment variable both beat the config file. They are the
+way back to a terminal when the daemon is the thing that will not start.
+
 ## Daemon Sessions
+
+```bash
+tuios
+```
+
+Running `tuios` with no subcommand attaches to a daemon-backed session, and
+starts the daemon first if none is running. This is `startup.daemon`, and it
+ships on. A daemon that will not start does not leave you without a terminal:
+`tuios` says so and runs the session standalone for that one run.
+
+An install that already has a config file keeps what that file says. The
+`[startup]` booleans are only read from the file, so `tuios` on an existing
+machine goes on doing what it did.
 
 A daemon session lives in a separate `tuios` daemon process. The daemon owns the
 shell processes (PTYs) and runs a terminal emulator for each one, so output keeps

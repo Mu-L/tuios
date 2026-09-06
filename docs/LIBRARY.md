@@ -152,8 +152,8 @@ tuios.WithWindowButtonStyle("dots")
 
 ### WithWindowButtonPosition(position string)
 
-Which end of the title bar the window controls sit on: `"right"` (default) or
-`"left"`, the way macOS does it. See
+Which end of the title bar the window controls sit on: `"left"` (default, the
+way macOS does it) or `"right"`. See
 [the configuration reference](https://tuios.gaurav.zip/docs/configuration).
 
 ```go

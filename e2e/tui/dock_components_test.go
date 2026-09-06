@@ -39,8 +39,15 @@ func TestDockDefaultListsDrawTheSameBar(t *testing.T) {
 	}
 	bareRow := dockRowText(t, bare)
 
+	// The two configs must differ in the dock lists and in nothing else. The
+	// [startup] booleans are the one thing a hand-written file does not inherit
+	// from the defaults, and tiled changes the dock's own mode chip, so it is
+	// spelled out here to match what the bare run loads.
 	base := t.TempDir()
 	writeConfig(t, base, `
+[startup]
+tiled = true
+
 [dock]
 left   = ["mode", "workspaces", "trail", "tape"]
 center = ["windows"]

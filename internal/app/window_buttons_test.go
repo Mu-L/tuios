@@ -184,42 +184,57 @@ func TestWindowButtonRectsDoNotOverlap(t *testing.T) {
 // minimize glyph's run is four cells and the constants name only its last
 // three; a recorded span is the whole run, padding included, so the button has
 // no dead cell in it.
+//
+// Both the style and the position are named. The constants are offsets from the
+// right-hand corner, so this only ever described the pill on the right, and
+// leaving the position to whatever config.Global held made it a test of the
+// shipped default rather than of the constants. It ships as dots on the left
+// now, and the constants did not move.
 func TestPillRectsMatchTheDocumentedOffsets(t *testing.T) {
-	withButtonStyle(t, config.WindowButtonStylePill, func() {
-		for _, tc := range []struct {
-			tiling              bool
-			action              WindowButtonAction
-			wantLeft, wantRight int
-		}{
-			{false, WindowButtonClose, config.CloseButtonLeft, config.CloseButtonRight},
-			{true, WindowButtonClose, config.CloseButtonLeft, config.CloseButtonRight},
-			{false, WindowButtonZoom, config.MaximizeButtonLeft, config.MaximizeButtonRight},
-			{true, WindowButtonMinimize, config.MinimizeButtonLeftTiling, config.MinimizeButtonRightTiling},
-		} {
-			win := &terminal.Window{ID: "w", X: 11, Y: 2, Width: 50, Height: 10, Workspace: 1}
-			m := &OS{Settings: config.Global, Windows: []*terminal.Window{win}}
-			cols, rects := drawTopBorder(t, m, win, tc.tiling)
-			end := win.X + len(cols) // one past the corner, which offset -1 names
+	withButtonPosition(t, config.WindowButtonPositionRight, func() {
+		withButtonStyle(t, config.WindowButtonStylePill, func() {
+			runPillOffsetCases(t)
+		})
+	})
+}
 
-			var got WindowButtonRect
-			for _, r := range rects {
-				if r.Action == tc.action {
-					got = r
-				}
-			}
-			left, right := got.X-end, got.X+got.W-1-end
-			if left > tc.wantLeft || right < tc.wantRight {
-				t.Errorf("tiling=%v %v was recorded on offsets %d..%d, which does not contain the documented %d..%d",
-					tc.tiling, tc.action, left, right, tc.wantLeft, tc.wantRight)
-			}
-			// And it may not spill past the documented span into the next
-			// control or the corner, which is the drift these replaced.
-			if left < tc.wantLeft-1 || right > tc.wantRight {
-				t.Errorf("tiling=%v %v was recorded on offsets %d..%d, wider than the %d..%d it was drawn on",
-					tc.tiling, tc.action, left, right, tc.wantLeft, tc.wantRight)
+// runPillOffsetCases is the body of TestPillRectsMatchTheDocumentedOffsets,
+// split out so the style and the position each get their own scope around it.
+func runPillOffsetCases(t *testing.T) {
+	t.Helper()
+	for _, tc := range []struct {
+		tiling              bool
+		action              WindowButtonAction
+		wantLeft, wantRight int
+	}{
+		{false, WindowButtonClose, config.CloseButtonLeft, config.CloseButtonRight},
+		{true, WindowButtonClose, config.CloseButtonLeft, config.CloseButtonRight},
+		{false, WindowButtonZoom, config.MaximizeButtonLeft, config.MaximizeButtonRight},
+		{true, WindowButtonMinimize, config.MinimizeButtonLeftTiling, config.MinimizeButtonRightTiling},
+	} {
+		win := &terminal.Window{ID: "w", X: 11, Y: 2, Width: 50, Height: 10, Workspace: 1}
+		m := &OS{Settings: config.Global, Windows: []*terminal.Window{win}}
+		cols, rects := drawTopBorder(t, m, win, tc.tiling)
+		end := win.X + len(cols) // one past the corner, which offset -1 names
+
+		var got WindowButtonRect
+		for _, r := range rects {
+			if r.Action == tc.action {
+				got = r
 			}
 		}
-	})
+		left, right := got.X-end, got.X+got.W-1-end
+		if left > tc.wantLeft || right < tc.wantRight {
+			t.Errorf("tiling=%v %v was recorded on offsets %d..%d, which does not contain the documented %d..%d",
+				tc.tiling, tc.action, left, right, tc.wantLeft, tc.wantRight)
+		}
+		// And it may not spill past the documented span into the next
+		// control or the corner, which is the drift these replaced.
+		if left < tc.wantLeft-1 || right > tc.wantRight {
+			t.Errorf("tiling=%v %v was recorded on offsets %d..%d, wider than the %d..%d it was drawn on",
+				tc.tiling, tc.action, left, right, tc.wantLeft, tc.wantRight)
+		}
+	}
 }
 
 // A window with no room for the pill records nothing, so the cells it gave back

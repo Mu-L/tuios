@@ -165,7 +165,12 @@ and prints the right command rather than overwriting it.
 ```bash
 tuios                    # Launch TUIOS
 tuios --show-keys        # Launch with key overlay for learning
+tuios --standalone       # Launch without the daemon, for this run only
 ```
+
+`tuios` attaches to a daemon-backed session, so the session outlives the
+terminal window it started in. New panes are tiled. See
+[SESSIONS.md](docs/SESSIONS.md) to turn either off.
 
 ### Essential Keys
 

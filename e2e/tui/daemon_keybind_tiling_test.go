@@ -2,7 +2,6 @@ package tuie2e
 
 import (
 	"testing"
-	"time"
 
 	"github.com/Gaurav-Gosain/tuitest"
 )
@@ -22,11 +21,9 @@ func TestKeybindTileThenNewWindows(t *testing.T) {
 	killDaemon(t, base)
 	waitBoot(t, term)
 
-	// Toggle tiling ON first (owner presses `t`).
-	if err := term.SendKeys("t"); err != nil {
-		t.Fatalf("send 't': %v", err)
-	}
-	time.Sleep(400 * time.Millisecond)
+	// Tiling ON first (owner presses `t`, unless the session already came up
+	// tiled, which is what startup.tiled ships as).
+	enableTiling(t, term)
 
 	// Then create three windows one at a time (owner presses `n` `n` `n`).
 	for i := 1; i <= 3; i++ {
