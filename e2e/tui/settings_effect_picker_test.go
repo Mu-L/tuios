@@ -1,6 +1,7 @@
 package tuie2e
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -37,8 +38,15 @@ var effectBands = []string{"none", "short", "medium", "long"}
 // binarypath long". The name is always the field before the duration band,
 // never the first field, which is what made this test click the wrong column
 // when the fifth match happened to be one of those rows.
+// trimRowEdge drops the trailing spaces and the pane's right border from a
+// row. A tiled pane reaches the last column, so its border sits after the
+// picker's own text and would otherwise read as the row's last field.
+func trimRowEdge(line string) string {
+	return strings.TrimRight(line, " \u2502\u2503|")
+}
+
 func effectNameIn(line string) string {
-	fields := strings.Fields(line)
+	fields := strings.Fields(trimRowEdge(line))
 	if len(fields) < 2 {
 		return ""
 	}
@@ -48,7 +56,7 @@ func effectNameIn(line string) string {
 func effectRowsOnScreen(s tuitest.Screen) (rows []int, text []string) {
 	_, height := s.Size()
 	for row := range height {
-		line := strings.TrimRight(s.Line(row), " ")
+		line := trimRowEdge(s.Line(row))
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
 			continue
@@ -174,4 +182,23 @@ func effectRowValue(t *testing.T, term *tuitest.Terminal) string {
 		t.Fatalf("the Effect row has no cycler value: %q", line)
 	}
 	return strings.TrimSpace(line[open+len("\u2039") : closeAt])
+}
+
+// TestEffectRowDetectorReadsABorderedRow pins the shape the row helpers must
+// cope with. A tiled pane draws its right border in the last column, so the
+// picker's rows arrive with that border after the band word. The helpers read
+// the band and the name from the end of the row, so an untrimmed border makes
+// every row unrecognisable and the picker looks empty while it is on screen.
+func TestEffectRowDetectorReadsABorderedRow(t *testing.T) {
+	const bordered = "│                   `                   › Effect               binarypath                                          long                                        │"
+
+	if got := effectNameIn(bordered); got != "binarypath" {
+		t.Errorf("effectNameIn read %q, want %q", got, "binarypath")
+	}
+
+	fields := strings.Fields(trimRowEdge(bordered))
+	last := fields[len(fields)-1]
+	if !slices.Contains(effectBands, last) {
+		t.Errorf("the row's last field is %q, which is not one of the bands %v", last, effectBands)
+	}
 }
