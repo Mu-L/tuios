@@ -452,12 +452,26 @@ func stateUnarranged(state *session.SessionState) bool {
 	return true
 }
 
-// ApplyStateSync applies a state update from another client.
-// This handles window creation, deletion, and property updates.
+// ApplyStateSync applies a state the daemon sent on its own account: a
+// mutation of its own, or the reconcile answer to this client's push. A peer's
+// push goes through ApplyStateSyncFrom, which is told whose push it is.
 func (m *OS) ApplyStateSync(state *session.SessionState) error {
+	return m.ApplyStateSyncFrom(state, "")
+}
+
+// ApplyStateSyncFrom applies a state update, from the daemon or from the peer
+// named by sourceID. This handles window creation, deletion, and property
+// updates.
+//
+// The origin decides one thing: whether the tiling topology in the state is
+// news. The daemon never computes a tree, so a tree arrives either because a
+// peer built it, or because the daemon is echoing what some client last
+// pushed, this client included. See adoptTopology below.
+func (m *OS) ApplyStateSyncFrom(state *session.SessionState, sourceID string) error {
 	if state == nil {
 		return nil
 	}
+	fromPeer := sourceID != ""
 
 	// The daemon now holds what arrived here, which is not necessarily what
 	// this client last pushed, so the record of that push no longer describes
@@ -513,8 +527,8 @@ func (m *OS) ApplyStateSync(state *session.SessionState) error {
 	newWindows := make([]*terminal.Window, 0, len(state.Windows))
 	var created []*terminal.Window
 	// Windows whose float state this sync moved. A float is a structural layout
-	// change and tiling topology is not adopted from a client push (see
-	// newerState below), so the structural half of the peer's toggle has to be
+	// change, and the tree that carries it is only adopted from some syncs (see
+	// adoptTopology below), so the structural half of the peer's toggle is
 	// mirrored here once the whole list has been applied.
 	var floated, unfloated []*terminal.Window
 	// Panes this sync took out of zoom. Zoom is shared and its rectangle is not,
@@ -581,14 +595,31 @@ func (m *OS) ApplyStateSync(state *session.SessionState) error {
 	// The BSP tree, the window->int-ID map and the split scheme are computed by
 	// clients, never by the daemon's own mutations (AddDaemonWindow and friends do
 	// not touch them). The daemon only stores what a client last synced and echoes
-	// it back, so a sync that is not strictly newer than the one this client
-	// already applied carries this client's own tiling state, often lagging a
-	// mutation this client has since made. Adopting that echo wipes the fresh tree
-	// and reassigns int IDs, which rebuilds the whole layout from scratch and drops
-	// a forced split direction (ctrl+b | / -). Version counts daemon-side
-	// mutations only, so it is exactly the right gate: adopt tiling topology only
-	// when the daemon has advanced past what this client last saw.
+	// it back. So a state the daemon sends on its own account that is not strictly
+	// newer than the one this client already applied carries this client's own
+	// tiling state, often lagging a mutation this client has since made: the
+	// reconcile answer to a push that raced a daemon-side window creation is the
+	// usual case. Adopting that echo wipes the fresh tree and reassigns int IDs,
+	// which rebuilds the whole layout from scratch and drops a forced split
+	// direction (ctrl+b | / -). Version counts daemon-side mutations only, so it
+	// is the right gate for those: adopt tiling topology from the daemon only when
+	// it has advanced past what this client last saw.
+	//
+	// A peer's push is the other source, and Version says nothing about it: a
+	// client push never advances Version, by design, so the tree a peer built
+	// arrives at the version this client already holds. The broadcast never comes
+	// back to its sender, so a state named as a peer's is by construction another
+	// client's tree and never an echo of this one's. It is adopted. Without that a
+	// peer that watched tiling turn on held the rectangles and no tree, drew a box
+	// around every borderless pane, and built a tree of its own on its first
+	// retile that disagreed with the one it was sent.
+	//
+	// What this does not settle: two clients reshaping the tree inside one round
+	// trip of each other, where the later push wins. That is the regime every
+	// client-written session field is in, and the end state for all of them is
+	// the same: the write becomes an op the daemon applies and versions.
 	newerState := state.Version > m.DaemonStateVersion
+	adoptTopology := newerState || fromPeer
 
 	// Update global state
 	m.SessionName = state.Name
@@ -646,14 +677,14 @@ func (m *OS) ApplyStateSync(state *session.SessionState) error {
 		}
 	}
 
-	// Update BSP state. Adopt the daemon's window->int-ID map only from a strictly
-	// newer sync, and even then merge rather than replace: a window this client has
-	// already mapped keeps its int ID, so a stale echo that omits it (or an already
-	// applied one) cannot strip the mapping and force getWindowIntID to hand out a
-	// fresh number. A churned int ID orphans the window's node in the tree, which
-	// TileAllWindows then rebuilds from scratch with the spiral scheme, discarding
-	// any forced split direction.
-	if newerState && state.WindowToBSPID != nil {
+	// Update BSP state. Adopt the window->int-ID map on the same terms as the
+	// tree it keys (see adoptTopology), and even then merge rather than replace:
+	// a window this client has already mapped keeps its int ID, so a stale echo
+	// that omits it (or an already applied one) cannot strip the mapping and
+	// force getWindowIntID to hand out a fresh number. A churned int ID orphans
+	// the window's node in the tree, which TileAllWindows then rebuilds from
+	// scratch with the spiral scheme, discarding any forced split direction.
+	if adoptTopology && state.WindowToBSPID != nil {
 		if m.WindowToBSPID == nil {
 			m.WindowToBSPID = make(map[string]int, len(state.WindowToBSPID))
 		}
@@ -683,9 +714,10 @@ func (m *OS) ApplyStateSync(state *session.SessionState) error {
 	// agrees on rather than the ones this client walked in with.
 	geometryChanged := m.adoptPaneGeometry(state)
 
-	// Update BSP trees, again only from a strictly newer sync so a lagging echo
-	// cannot clobber the tree this client just computed (see newerState above).
-	if newerState && state.WorkspaceTrees != nil && state.AutoTiling {
+	// Update BSP trees, from a strictly newer daemon state or from a peer, so a
+	// lagging echo of this client's own tree cannot clobber the one it just
+	// computed (see adoptTopology above).
+	if adoptTopology && state.WorkspaceTrees != nil && state.AutoTiling {
 		m.WorkspaceTrees = make(map[int]*layout.BSPTree)
 		for ws, serialized := range state.WorkspaceTrees {
 			if serialized != nil {
@@ -700,10 +732,12 @@ func (m *OS) ApplyStateSync(state *session.SessionState) error {
 	}
 
 	// Mirror the structural half of a float toggled elsewhere. The peer that
-	// floated a pane removed it from its own tiling structure and retiled, but
-	// a client push never carries the tree (newerState gates it), so this
-	// client's tree still holds the leaf; left there, the tiled panes never
-	// fill the box again and every sync reads as a stale layout. RemoveWindow
+	// floated a pane removed it from its own tiling structure and retiled. Its
+	// push carries the tree without the leaf and a peer's tree is adopted above,
+	// so this is usually already done; it stays for a state that arrives with
+	// no tree to adopt, where this client's tree would still hold the leaf and,
+	// left there, the tiled panes never fill the box again and every sync reads
+	// as a stale layout. RemoveWindow
 	// ignores an id a tree does not hold, so every tree is asked, the way
 	// adoptSyncedWindows handles a closed pane. A pane tiled again is re-added
 	// where this client would add one of its own; on another workspace the

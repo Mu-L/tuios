@@ -43,7 +43,7 @@ func (m *OS) WireDaemonClient(client *session.TUIClient) {
 	})
 	client.OnStateSync(func(state *session.SessionState, triggerType, sourceID string) {
 		clientLog("State sync: trigger=%s, source=%s", triggerType, shortClientID(sourceID))
-		if m.QueueStateSync(state) {
+		if m.QueueStateSync(StateSyncMsg{State: state, TriggerType: triggerType, SourceID: sourceID}) {
 			clientLog("StateSyncChan full, superseded the queued snapshot")
 		}
 	})

@@ -57,10 +57,10 @@ func (e *exchange) take() (func(), bool) {
 // peer makes, and the size the daemon settles on. Both are what the program
 // loop does with them.
 func (e *exchange) route(c *session.TUIClient, m *OS, label string) {
-	c.OnStateSync(func(state *session.SessionState, _, _ string) {
+	c.OnStateSync(func(state *session.SessionState, _, sourceID string) {
 		e.enqueue(func() {
 			e.n++
-			if err := m.ApplyStateSync(state); err != nil {
+			if err := m.ApplyStateSyncFrom(state, sourceID); err != nil {
 				e.t.Errorf("%s: apply state sync: %v", label, err)
 			}
 		})

@@ -148,7 +148,10 @@ type RemoteTapeScriptDoneMsg struct {
 
 // Multi-client message types for daemon mode
 
-// StateSyncMsg is sent when another client updates session state.
+// StateSyncMsg is a session state arriving from the daemon. SourceID names the
+// peer whose push it carries, and is empty for a state the daemon sent on its
+// own account: a mutation of its own, or the reconcile answer to this client's
+// push.
 type StateSyncMsg struct {
 	State       *session.SessionState
 	TriggerType string
@@ -372,18 +375,18 @@ func ListenForWindowExits(exitChan chan string) tea.Cmd {
 
 // ListenForStateSync creates a command that listens for state sync from other clients.
 // It safely reads from the sync channel and converts state to messages for the update loop.
-func ListenForStateSync(syncChan chan *session.SessionState) tea.Cmd {
+func ListenForStateSync(syncChan chan StateSyncMsg) tea.Cmd {
 	if syncChan == nil {
 		return nil
 	}
 	return func() tea.Msg {
 		// Safe channel read with protection against closed channel
-		state, ok := <-syncChan
+		sync, ok := <-syncChan
 		if !ok {
 			// Channel closed, return nil to stop listening
 			return nil
 		}
-		return StateSyncMsg{State: state}
+		return sync
 	}
 }
 
@@ -1525,7 +1528,7 @@ func (m *OS) handleMsg(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			oldWindowCount := len(m.Windows)
 			oldWorkspace := m.CurrentWorkspace
 
-			if err := m.ApplyStateSync(msg.State); err != nil {
+			if err := m.ApplyStateSyncFrom(msg.State, msg.SourceID); err != nil {
 				m.LogError("Failed to apply state sync: %v", err)
 			} else {
 				// The daemon-created startup window arrives here; if the user asked
