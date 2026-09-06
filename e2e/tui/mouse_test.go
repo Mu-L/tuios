@@ -179,6 +179,58 @@ func waitScrolledTo(t *testing.T, term *tuitest.Terminal, prefix, what string, w
 	}
 }
 
+// settledScroll is how a test reads the place a gesture left the person, and it
+// waits for the gesture to finish before it answers.
+//
+// A wheel gesture is a run of notches and tuios draws them at its frame rate,
+// so the screen trails the last notch by up to a frame. wheelAt pauses 30ms
+// after each report and a frame at the default 60fps is 17ms, which leaves no
+// margin: measured on this box the last notch reached the screen between 25ms
+// and 44ms after it was written. Read the screen the moment wheelAt returns and
+// roughly one run in eight reads a place the view is still travelling through,
+// one notch short of where it stopped.
+//
+// Every assertion that compares a later view against an earlier one is built on
+// this read, and each of them blamed the later event for the notch the client
+// had not drawn yet. TestARemoteSendKeysLeavesAScrolledPaneScrolled reported it
+// as "a remote key moved the view from REMOTE-174-END to REMOTE-171-END", three
+// lines back, on a client no key had reached: 174 is nine notches and 171 is
+// ten. The same read is why waitScrolledTo cannot do this job. Its predicate
+// says the view has started moving, and the wheel is still turning when it
+// first holds.
+//
+// The view is settled when the newest marker on screen has held the same value
+// for scrollSettleQuiet. If it never holds, the last value seen is returned and
+// the caller's own assertion says what went wrong, which keeps a broken anchor
+// reported as a moving view rather than as a stuck helper.
+func settledScroll(t *testing.T, term *tuitest.Terminal, prefix string) int {
+	t.Helper()
+	last := newestVisible(term.Screen(), prefix)
+	steady := time.Now()
+	deadline := time.Now().Add(scrollSettleCap)
+	for time.Now().Before(deadline) {
+		n := newestVisible(term.Screen(), prefix)
+		if n != last {
+			last, steady = n, time.Now()
+		} else if time.Since(steady) >= scrollSettleQuiet {
+			return last
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return last
+}
+
+const (
+	// scrollSettleQuiet is how long the newest marker must hold still before
+	// the view counts as settled. It is an order of magnitude over the frame
+	// interval the client draws at, so a notch in flight always lands inside
+	// it.
+	scrollSettleQuiet = 250 * time.Millisecond
+	// scrollSettleCap bounds the wait for a view that keeps moving, so a pane
+	// under output does not hold a test open until its timeout.
+	scrollSettleCap = 3 * time.Second
+)
+
 // TestWheelScrollShowsScrollbackWithoutAnnouncingAMode is the centre of the
 // change. Turning the wheel over a pane used to drop the user into copy mode
 // and put "Copy mode (hjkl, q to exit)" on the dock along with a line of vim keybindings,
@@ -300,7 +352,7 @@ func TestARemoteSendKeysLeavesAScrolledPaneScrolled(t *testing.T) {
 	wheelAt(t, term, col, row, tuitest.MouseWheelUp, 10)
 	waitScrolledTo(t, term, "REMOTE", "the wheel did not scroll",
 		func(n int) bool { return n > 0 && n <= 190 })
-	before := newestVisible(term.Screen(), "REMOTE")
+	before := settledScroll(t, term, "REMOTE")
 
 	// An agent types a command and runs it, key by key, through the client.
 	for _, keys := range [][]string{{"--raw", "echo remote-$((6*7))"}, {"Enter"}} {
