@@ -360,7 +360,7 @@ func (t *GhosttyTerminal) captureScreenLocked(idx int) {
 		if int(y) >= t.height {
 			continue
 		}
-		t.syncRowLocked(t.bufs[idx], int(y))
+		t.syncRowLocked(t.bufAt(idx), int(y))
 	}
 	_ = t.rs.Clean()
 }

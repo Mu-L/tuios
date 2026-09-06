@@ -28,6 +28,15 @@ func NewScreen(w, h int) *Screen {
 	return &s
 }
 
+// newAltScreen creates the alternate screen: a 1x1 grid with no scrollback
+// ring. Emulator.altScreen grows it to the main screen's size on first use.
+func newAltScreen() *Screen {
+	s := Screen{}
+	s.buf = uv.NewRenderBuffer(1, 1)
+	s.scroll = s.buf.Bounds()
+	return &s
+}
+
 // Reset resets the screen.
 // It clears the screen, sets the cursor to the top left corner, reset the
 // cursor styles, and resets the scroll region.
@@ -460,8 +469,7 @@ func (s *Screen) ScrollUp(n int) {
 		// and have to be copied out before DeleteLine overwrites them.
 		if save {
 			for i := 0; i < n && i < scroll.Dy(); i++ {
-				line := extractLine(s.buf.Buffer, scroll.Min.Y+i, width)
-				s.scrollback.PushLineOwned(line)
+				s.scrollback.PushLine(extractLine(s.buf.Buffer, scroll.Min.Y+i, width))
 			}
 		}
 		s.DeleteLine(n)
@@ -510,10 +518,11 @@ func (s *Screen) rotateWholeScreenUp(n int, save bool) bool {
 	}
 
 	// Lift the rows leaving the top, slide the rest up, and put the lifted
-	// slices back at the bottom to be blanked. The scratch array keeps the
-	// common case (one line, printing output) free of allocation; only a large
-	// CSI S needs the heap, and then for one slice of line headers rather than
-	// for any cells.
+	// slices back at the bottom to be blanked. The scrollback packs its own
+	// copy of each departing row, so the row's storage stays with the screen
+	// and the common case (one line, printing output) allocates only what
+	// the ring keeps. The scratch array means only a large CSI S needs the
+	// heap for the slice of line headers.
 	var scratch [16]uv.Line
 	var recycled []uv.Line
 	if n <= len(scratch) {
@@ -524,15 +533,8 @@ func (s *Screen) rotateWholeScreenUp(n int, save bool) bool {
 	copy(recycled, lines[:n])
 	copy(lines, lines[n:])
 	if save {
-		for i, row := range recycled {
-			reuse := s.scrollback.PushLineOwnedRecycle(row)
-			if len(reuse) == len(row) {
-				recycled[i] = reuse
-			} else {
-				// Nothing evicted yet, or the ring is still holding lines from
-				// before a resize, so the row it gave back is the wrong width.
-				recycled[i] = make(uv.Line, len(row))
-			}
+		for _, row := range recycled {
+			s.scrollback.PushLine(row)
 		}
 	}
 	copy(lines[height-n:], recycled)

@@ -63,6 +63,9 @@ func (t *GhosttyTerminal) ScrollbackLen() int {
 	return n
 }
 
+// ghosttyScrollCacheCap bounds the decoded history line cache.
+const ghosttyScrollCacheCap = 256
+
 func (t *GhosttyTerminal) ScrollbackLine(index int) uv.Line {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -74,7 +77,11 @@ func (t *GhosttyTerminal) scrollbackLineLocked(index int) uv.Line {
 	if t.closed.Load() || index < 0 || index >= t.scrollbackLenLocked() {
 		return nil
 	}
-	if t.scrollCacheGen != t.scrollGeneration {
+	// The cache is emptied when the pane writes, and also when it grows past
+	// a few screens of rows: a capture of the whole history is 10000 decoded
+	// lines of 112-byte cells, and a pane that is then idle would have kept
+	// them for as long as it stayed idle.
+	if t.scrollCacheGen != t.scrollGeneration || len(t.scrollCache) >= ghosttyScrollCacheCap {
 		clear(t.scrollCache)
 		t.scrollCacheGen = t.scrollGeneration
 	}
@@ -216,6 +223,9 @@ func (t *GhosttyTerminal) ClearScrollback() {
 // SetScrollbackMaxLines records the limit. The library takes the limit at
 // construction; a runtime change applies from the next terminal, which the
 // differential harness documents as an accepted divergence.
+// SetScrollbackMaxLines records the depth asked for. libghostty takes the
+// depth only when the terminal is made, so this cannot change what the
+// library keeps; build a pane through NewWithScrollback to set it.
 func (t *GhosttyTerminal) SetScrollbackMaxLines(maxLines int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

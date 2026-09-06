@@ -22,11 +22,14 @@ package tuie2e
 // user feels most of the time and p90 is what they complain about.
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -461,9 +464,15 @@ func daemonRSS(t *testing.T, base string) int {
 	if err != nil {
 		t.Fatalf("parse daemon pid %q: %v", raw, err)
 	}
+	return rssOf(t, pid)
+}
+
+// rssOf reads a process's resident set size in KiB.
+func rssOf(t *testing.T, pid int) int {
+	t.Helper()
 	status, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
 	if err != nil {
-		t.Fatalf("read daemon status: %v", err)
+		t.Fatalf("read status of %d: %v", pid, err)
 	}
 	for line := range strings.SplitSeq(string(status), "\n") {
 		if !strings.HasPrefix(line, "VmRSS:") {
@@ -538,4 +547,140 @@ func TestPerfMemorySoak(t *testing.T) {
 		time.Sleep(4 * time.Second)
 		t.Logf("PERF memory/soak round %d (40k lines): %6d KiB resident", round, daemonRSS(t, base))
 	}
+}
+
+// pprofHeapHeld is pprofHeapInUse after a collection, so the figure is what
+// the process holds rather than what it has not swept yet.
+func pprofHeapHeld(addr string) (uint64, error) {
+	body, err := httpGet(fmt.Sprintf("http://%s/debug/pprof/heap?gc=1&debug=1", addr))
+	if err != nil {
+		return 0, err
+	}
+	m := heapInUseRe.FindStringSubmatch(body)
+	if m == nil {
+		return 0, fmt.Errorf("no HeapInuse in profile")
+	}
+	return strconv.ParseUint(m[1], 10, 64)
+}
+
+// startDaemonWithPprof runs the daemon under base with --pprof and returns
+// the address it profiles on, so a client started afterwards attaches to a
+// daemon that can answer for its heap.
+func startDaemonWithPprof(t *testing.T, base string) string {
+	t.Helper()
+	env := os.Environ()
+	for _, key := range xdgKeys {
+		env = append(env, key+"="+filepath.Join(base, key))
+	}
+	addr := fmt.Sprintf("127.0.0.1:%d", freePort(t))
+	daemon := exec.Command(tuiosBin, "daemon", "--pprof", addr)
+	daemon.Env = env
+	daemon.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := daemon.Start(); err != nil {
+		t.Fatalf("start daemon: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = daemon.Process.Kill()
+		_, _ = daemon.Process.Wait()
+	})
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		if _, err := pprofHeapInUse(addr); err == nil {
+			return addr
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the daemon never served /debug/pprof on %s", addr)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// windowIDs lists the session's window ids through the CLI.
+func windowIDs(t *testing.T, base, session string) []string {
+	t.Helper()
+	out, err := tuiosCLI(t, base, "list-windows", "-s", session, "--json")
+	if err != nil {
+		t.Fatalf("list-windows: %v: %s", err, out)
+	}
+	var reply struct {
+		Windows []struct {
+			ID string `json:"window_id"`
+		} `json:"windows"`
+	}
+	if err := json.Unmarshal([]byte(out), &reply); err != nil {
+		t.Fatalf("list-windows json: %v: %s", err, out)
+	}
+	ids := make([]string, 0, len(reply.Windows))
+	for _, w := range reply.Windows {
+		ids = append(ids, w.ID)
+	}
+	return ids
+}
+
+// TestPerfMemoryClientAndDaemon reports the resident size and Go heap of an
+// attached client and its daemon at the maintainer's terminal size, as panes
+// open and then fill their scrollback. Both processes hold an emulator per
+// pane, so both are in the figure: the number a user reads off top is the
+// sum. The heap is read after a collection. Resident size runs ahead of it
+// because the runtime lets the heap double between collections and hands
+// pages back slowly.
+func TestPerfMemoryClientAndDaemon(t *testing.T) {
+	perfGate(t)
+	base := perfBase(t)
+	daemonAddr := startDaemonWithPprof(t, base)
+	clientAddr := fmt.Sprintf("127.0.0.1:%d", freePort(t))
+	term := startIn(t, base, startOpts{
+		cols: perfCols, rows: perfRows,
+		args: []string{"new", "mem", "--pprof", clientAddr},
+		env:  perfEnvVars(),
+	})
+	waitBoot(t, term)
+
+	report := func(what string) {
+		t.Helper()
+		time.Sleep(750 * time.Millisecond)
+		clientHeap, err := pprofHeapHeld(clientAddr)
+		if err != nil {
+			t.Fatalf("client heap: %v", err)
+		}
+		daemonHeap, err := pprofHeapHeld(daemonAddr)
+		if err != nil {
+			t.Fatalf("daemon heap: %v", err)
+		}
+		t.Logf("PERF memory/%s: client %6d KiB resident (%6d KiB heap), daemon %6d KiB resident (%6d KiB heap)",
+			what, rssOf(t, term.Pid()), clientHeap/1024, daemonRSS(t, base), daemonHeap/1024)
+	}
+	report("boot")
+
+	const panes = 8
+	for i := 1; i <= panes; i++ {
+		newWindow(t, term)
+		if i == 1 {
+			enableTiling(t, term)
+		}
+	}
+	report(fmt.Sprintf("%d panes", panes))
+
+	// Past the default 10000-line ring in every pane. The marker is computed
+	// by the shell so the echo of the command cannot satisfy the wait.
+	ids := windowIDs(t, base, "mem")
+	for _, id := range ids {
+		if out, err := tuiosCLI(t, base, "send-text", "-s", "mem", "-w", id, "seq 1 20000; echo FLOOD$((1+1))DONE\n"); err != nil {
+			t.Fatalf("send-text: %v: %s", err, out)
+		}
+	}
+	deadline := time.Now().Add(2 * time.Minute)
+	for _, id := range ids {
+		for {
+			out, _ := tuiosCLI(t, base, "capture-pane", "-s", "mem", "-w", id, "--lines", "3")
+			if strings.Contains(out, "FLOOD2DONE") {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("window %s never finished its flood:\n%s", id, out)
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+	report(fmt.Sprintf("%d panes, scrollback full", panes))
 }

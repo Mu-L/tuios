@@ -537,11 +537,10 @@ func NewWindow(id, title string, x, y, width, height, z int, exitChan chan strin
 	terminalWidth := max(width-2, 1)
 	terminalHeight := max(height-2, 1)
 	// Create terminal with scrollback buffer support
-	terminal := vt.New(terminalWidth, terminalHeight)
 	// How deep the scrollback goes is the session's setting, handed in rather
 	// than read from a package global: one server process holds several
 	// sessions and they need not agree about it.
-	terminal.SetScrollbackMaxLines(scrollbackLines)
+	terminal := vt.NewWithScrollback(terminalWidth, terminalHeight, scrollbackLines)
 
 	// Set cell size for XTWINOPS terminal size reporting
 	// Using 10x20 pixels as reasonable defaults for a typical monospace font
@@ -749,8 +748,7 @@ func NewDaemonWindow(id, title string, x, y, width, height, z int, ptyID string,
 	// Create VT terminal with inner dimensions (accounting for borders)
 	terminalWidth := max(width-2, 1)
 	terminalHeight := max(height-2, 1)
-	terminal := vt.New(terminalWidth, terminalHeight)
-	terminal.SetScrollbackMaxLines(scrollbackLines)
+	terminal := vt.NewWithScrollback(terminalWidth, terminalHeight, scrollbackLines)
 	terminal.SetCellSize(10, 20)
 
 	window := &Window{
@@ -771,9 +769,13 @@ func NewDaemonWindow(id, title string, x, y, width, height, z int, ptyID string,
 		IsBeingManipulated: false,
 		PTYID:              ptyID,
 		DaemonMode:         true,
-		outputChan:         make(chan outputChunk, 16384), // Large buffer: kitty images can be 250+ chunks
-		outputDone:         make(chan struct{}),
-		coalesceWake:       make(chan struct{}, 1),
+		// Each item is one batch off the daemon stream, up to 256 KiB, so
+		// 4096 slots is a gigabyte of backlog before a send is dropped.
+		// It was 16384, which is 900 KiB of channel per pane for a queue
+		// that never gets a hundred items deep.
+		outputChan:   make(chan outputChunk, 4096),
+		outputDone:   make(chan struct{}),
+		coalesceWake: make(chan struct{}, 1),
 		// suppressCallbacks defaults to false (zero value)
 	}
 	// See NewWindow: the cursor cache must not start on a zero value.

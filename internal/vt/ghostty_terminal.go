@@ -44,7 +44,10 @@ type GhosttyTerminal struct {
 	cursorSteady bool
 
 	// bufs shadow the two screens in uv cells; bufs[0] is main. active
-	// mirrors which one libghostty is drawing to.
+	// mirrors which one libghostty is drawing to. bufs[1] is nil until the
+	// guest first enters the alternate screen (see bufAt), so a pane that
+	// never runs a full-screen program does not carry a second grid of
+	// 112-byte cells.
 	bufs   [2]*uv.Buffer
 	active int
 	// gridStale is set by Write and cleared by syncLocked.
@@ -121,22 +124,48 @@ type GhosttyTerminal struct {
 	restore *ghosttyRestore
 }
 
+// bufAt returns the shadow buffer for screen idx, making the alternate one on
+// first use. Callers hold mu.
+func (t *GhosttyTerminal) bufAt(idx int) *uv.Buffer {
+	if t.bufs[idx] == nil {
+		t.bufs[idx] = uv.NewBuffer(t.width, t.height)
+	}
+	return t.bufs[idx]
+}
+
 var _ Terminal = (*GhosttyTerminal)(nil)
 
-// NewGhosttyTerminal creates a libghostty-backed terminal.
+// ghosttyScrollbackRowBudget is the byte allowance per requested scrollback
+// line. libghostty keeps two limits and prunes at whichever is reached first.
+// Its default byte limit is 10 000 bytes, which is below one page, so with
+// only the line limit set a 207-column pane kept about 400 lines of the
+// 10 000 asked for and an 80-column one about 870. A row measures about 8
+// bytes a cell plus page overhead, so 4 KiB a line leaves the line limit as
+// the one that binds up to a few hundred columns.
+const ghosttyScrollbackRowBudget = 4096
+
+// NewGhosttyTerminal creates a libghostty-backed terminal with the default
+// scrollback depth.
 func NewGhosttyTerminal(w, h int) *GhosttyTerminal {
+	return newGhosttyTerminal(w, h, DefaultScrollbackSize)
+}
+
+func newGhosttyTerminal(w, h, maxLines int) *GhosttyTerminal {
 	if w <= 0 {
 		w = 1
 	}
 	if h <= 0 {
 		h = 1
 	}
+	if maxLines <= 0 {
+		maxLines = DefaultScrollbackSize
+	}
 	t := &GhosttyTerminal{
 		width:           w,
 		height:          h,
 		cellW:           defaultCellWidth,
 		cellH:           defaultCellHeight,
-		scrollbackMax:   DefaultScrollbackSize,
+		scrollbackMax:   maxLines,
 		styleCache:      make(map[uint16]uv.Style),
 		scrollCache:     make(map[int]uv.Line),
 		charsetIDs:      defaultCharsetIDs,
@@ -150,13 +179,14 @@ func NewGhosttyTerminal(w, h int) *GhosttyTerminal {
 		cursorSteady:    defaultCursorSteady,
 	}
 	t.bufs[0] = uv.NewBuffer(w, h)
-	t.bufs[1] = uv.NewBuffer(w, h)
+	// bufs[1] is made by bufAt on the first switch to the alternate screen.
 	t.scrollRegion = uv.Rect(0, 0, w, h)
 	t.dec = newGhosttyCellDecoder()
 
 	term, err := gh.NewTerminal(
 		gh.WithSize(clampU16(w), clampU16(h)),
 		gh.WithMaxScrollbackLines(uint(t.scrollbackMax)),
+		gh.WithMaxScrollbackBytes(uint(t.scrollbackMax)*ghosttyScrollbackRowBudget),
 		gh.WithWritePty(func(_ *gh.Terminal, data []byte) {
 			// Query responses; the pipe write never blocks.
 			_, _ = t.pipe.Write(data)
@@ -412,7 +442,9 @@ func (t *GhosttyTerminal) Resize(width, height int) {
 	t.width, t.height = width, height
 	_ = t.term.Resize(clampU16(width), clampU16(height), uint32(t.cellW), uint32(t.cellH))
 	t.bufs[0].Resize(width, height)
-	t.bufs[1].Resize(width, height)
+	if t.bufs[1] != nil {
+		t.bufs[1].Resize(width, height)
+	}
 	// DECSTBM margins reset on resize, as on the pure emulator's screens.
 	t.scrollRegion = uv.Rect(0, 0, width, height)
 	t.gridStale = true
