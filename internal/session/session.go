@@ -1707,7 +1707,10 @@ func (p *PTY) subscribe(clientID string, fromSeq int64, fromSnapshot bool) <-cha
 		return existing.ch
 	}
 
-	sub := &ptySubscriber{ch: make(chan ptyChunk, 16384)} // Large buffer matching client-side outputChan capacity
+	// Each chunk is one PTY read of up to 16 KiB, so 4096 slots hold 64 MiB
+	// of output for a client that has stopped reading before it is dropped.
+	// The channel itself is 160 KiB per (client, pane); at 16384 it was 640.
+	sub := &ptySubscriber{ch: make(chan ptyChunk, 4096)}
 	p.subscribers[clientID] = sub
 	debugLog("[DEBUG] PTY %s: added subscriber %s (total: %d)", p.ID[:8], clientID, len(p.subscribers))
 
