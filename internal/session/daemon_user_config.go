@@ -35,6 +35,10 @@ func DaemonConfigFromUser(uc *config.UserConfig) *DaemonConfig {
 	cfg.AgentDetectInterval = time.Duration(uc.Daemon.AgentDetectSeconds) * time.Second
 	cfg.AgentBinaries = uc.Daemon.AgentBinaries
 	cfg.Hosts = HostsFromConfig(uc)
+	// The daemon owns every pane's history, so the depth the user asked for
+	// has to reach it: the client's emulator honoured the setting and the
+	// daemon's kept ten thousand lines whatever it said.
+	cfg.ScrollbackLines = uc.Appearance.ScrollbackLines
 	// The daemon runs the hooks for the facts it owns, so a session with
 	// nobody attached still runs them. The client keeps the hooks that need a
 	// terminal.

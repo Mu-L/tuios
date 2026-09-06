@@ -769,6 +769,18 @@ type SessionConfig struct {
 	// The manager stamps it from the daemon's own socket when a session is
 	// created, so it is exported into every pane's environment as TUIOS_SOCKET.
 	SocketPath string
+	// ScrollbackLines is the history depth every pane in this session keeps.
+	// The manager stamps it from the daemon's config; zero means the
+	// emulator's default.
+	ScrollbackLines int
+}
+
+// scrollbackLines is the history depth a new pane in this session keeps.
+func (s *Session) scrollbackLines() int {
+	if s.config != nil && s.config.ScrollbackLines > 0 {
+		return s.config.ScrollbackLines
+	}
+	return vt.DefaultScrollbackSize
 }
 
 // NewSession creates a new persistent session.
@@ -965,7 +977,7 @@ func (s *Session) createPTY(windowID string, width, height int, cwd string, comm
 
 	// Create VT emulator for persistent terminal state
 	// This maintains scrollback, screen content, cursor position across reconnects
-	terminal := vt.NewWithScrollback(width, height, 10000) // Match default scrollback
+	terminal := vt.NewWithScrollback(width, height, s.scrollbackLines())
 
 	// For a restored shell, seed the emulator with a one-line banner so the
 	// respawned process is clearly marked. This is written directly (before the

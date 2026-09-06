@@ -247,6 +247,11 @@ type DaemonConfig struct {
 	LogFile string
 	// DisableAutoRestore skips restoring saved sessions on daemon start.
 	DisableAutoRestore bool
+	// ScrollbackLines is how many lines of history every pane the daemon makes
+	// keeps, from appearance.scrollback_lines. Zero means the default. A pane
+	// takes it when it is made and keeps it, so a change applies to panes made
+	// after the daemon next reads its config.
+	ScrollbackLines int
 	// AgentStallTimeout overrides how long a pane may report working with no
 	// output before the stall heuristic demotes it to idle. Zero falls back to
 	// the TUIOS_AGENT_STALL_SECONDS environment override, then to the default; a
@@ -301,6 +306,7 @@ func NewDaemon(cfg *DaemonConfig) *Daemon {
 	// The socket path is read through a closure rather than copied, because the
 	// line below may still change it and the stash root is derived from it.
 	d.stash = newStashStore(func() string { return d.manager.SocketPath() })
+	d.manager.SetScrollbackLines(cfg.ScrollbackLines)
 	d.agentDetectInterval = resolveAgentDetectInterval(cfg.AgentAutoDetect, cfg.AgentDetectInterval)
 	d.loadHooks(cfg)
 
