@@ -354,10 +354,13 @@ func (m *OS) NewWindowPlacement() (x, y, width, height int) {
 	width = contentWidth / 2
 	height = screenHeight / 2
 
-	if !m.AutoTiling && m.LastMouseX > 0 && m.LastMouseY > 0 {
+	// The pointer's last reported position, not the last motion that reached
+	// Update: the filter drops the motion nothing reacts to, and a pane that
+	// spawned where a hover last happened to be would land somewhere random.
+	if px, py := m.PointerSeen(); !m.AutoTiling && px > 0 && py > 0 {
 		// Spawn at the cursor, kept inside the content region.
-		x = min(m.LastMouseX, leftMargin+contentWidth-width)
-		y = min(m.LastMouseY, screenHeight-height)
+		x = min(px, leftMargin+contentWidth-width)
+		y = min(py, screenHeight-height)
 		return max(x, leftMargin), max(y, 0), width, height
 	}
 

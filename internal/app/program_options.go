@@ -133,12 +133,35 @@ func FilterMouseMotion(model tea.Model, msg tea.Msg) tea.Msg {
 	// Debug: log motion events
 	debugLogEvent(m, msg)
 
+	mouse := mm.Mouse()
+	// Every motion passes this line, dropped or not, so this is where the
+	// pointer's position is kept for the things that only need to know where
+	// it is. Nothing below reads it.
+	m.NotePointerSeen(mouse.X, mouse.Y)
+
 	if m.Dragging || m.Resizing {
 		return msg
 	}
 
-	mouse := mm.Mouse()
+	// A ctrl-click on pane content is a grab waiting for the pointer to move
+	// far enough to become a drag, and the handler that commits it can only
+	// run on motion. Nothing is dragging yet, so the clause above does not
+	// cover it; it used to reach Update only because the link clause below
+	// passed every motion over content, and with links off it was dead.
+	if m.CtrlDragPending {
+		return msg
+	}
+
 	movedCell := mouse.X != m.LastMouseX || mouse.Y != m.LastMouseY
+
+	// Zen mode's mouse variant reveals every border while the pointer moves
+	// and hides them when it rests, and the clock it reads is the time of the
+	// last motion that reached Update. It has to see the motion to keep that
+	// time current, one event per cell crossed: the same cost it paid while it
+	// rode the link clause below, and now over the chrome as well.
+	if m.Settings.ZenMode == config.ZenModeMouse && movedCell {
+		return msg
+	}
 
 	// A shake of the pointer toggles the spotlight, and the detector reads it
 	// off bare motion. This filter is a whitelist, so the gesture is dead until
@@ -210,30 +233,41 @@ func FilterMouseMotion(model tea.Model, msg tea.Msg) tea.Msg {
 	// the motion that crosses it.
 	//
 	// This is the one clause whose target is not a rectangle the chrome drew.
-	// Any cell a program printed may carry a link, so the test is the pane's
-	// content box, and that is most of the screen. It therefore relaxes the CPU
-	// guard the clauses above keep, and it is the only thing in this feature
-	// that costs anything on a machine nobody is pointing at a link on. Two
-	// things bound it:
+	// Any cell a program printed may carry a link, so it used to pass every
+	// motion over any pane's content box, which is most of the screen: a
+	// sweep of the pointer across an idle shell composed one full frame per
+	// cell crossed, for a hover that underlined nothing. It now asks the pane
+	// whether there is a link under the cell (see PointerOverLink), which is
+	// the question the handler was going to ask anyway, and passes the motion
+	// only when the answer is yes. Two things still bound it:
 	//
 	//   - appearance.links = off makes both tests below false, and the filter
-	//     then drops exactly what it dropped before any of this existed. That is
-	//     the setting for anyone who would rather have the guard than the links.
+	//     then drops exactly what it dropped before any of this existed.
 	//   - Only a motion that reaches a different cell is passed. A pointer
 	//     nudged inside one cell resolves to the same run and would compose an
-	//     identical frame, so a sweep costs one event per cell crossed rather
-	//     than one per event the host chose to send.
+	//     identical frame.
 	//
 	// LinkHoverActive keeps one more event flowing after the pointer leaves a
 	// link, and that is the event that clears the underline.
 	if movedCell {
-		if m.LinkHoverActive() || m.PointerOverPaneContent(mouse.X, mouse.Y) {
+		if m.LinkHoverActive() || m.PointerOverLink(mouse.X, mouse.Y) {
 			return msg
 		}
 	}
 
 	// Allow motion events for scrollback browser drag-to-select
 	if m.ShowScrollbackBrowser {
+		return msg
+	}
+
+	// The dock's session controls brighten under the pointer and a clipped
+	// workspace pill says its name, and both are tracked off motion over the
+	// band. Neither had a clause here, so on every client the motion was
+	// dropped before the handler that tracks them ran: the hover and both
+	// labels were dead unless some other clause happened to pass the event.
+	// One event per cell crossed while over the band, and one more after the
+	// pointer leaves it, which is the event that clears the reveal.
+	if movedCell && (m.InDockBand(mouse.Y) || m.DockHoverActive()) {
 		return msg
 	}
 

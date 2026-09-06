@@ -153,9 +153,16 @@ type OS struct {
 	//
 	//   NEVER BLOCK WHILE HOLDING IT: it is taken on the UI goroutine every
 	//   frame, so any block here is a visible stall.
-	terminalMu      sync.RWMutex
-	LastMouseX      int
-	LastMouseY      int
+	terminalMu sync.RWMutex
+	LastMouseX int
+	LastMouseY int
+	// pointerSeenX/Y is where the host last reported the pointer, whether or
+	// not that motion reached Update. LastMouseX/Y is the position of the
+	// last motion that did reach it, which is what the filter's "moved a
+	// cell" tests are written against, so the two cannot be one field. See
+	// NotePointerSeen.
+	pointerSeenX    int
+	pointerSeenY    int
 	ShowHelp        bool
 	InteractionMode bool              // True when actively dragging/resizing
 	MouseSnapping   bool              // Enable/disable mouse snapping

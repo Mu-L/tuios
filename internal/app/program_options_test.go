@@ -137,8 +137,9 @@ func TestMotionFilterFollowsTheBeam(t *testing.T) {
 	o := filterOS(t)
 	o.UserConfig.Appearance.Links = "off"
 	o.UserConfig.Spotlight.Follow = config.SpotlightFollowMouse
-	// The dock row: chrome, not pane content, so no other clause claims it.
-	overChrome := tea.MouseMotionMsg{X: 60, Y: 39}
+	// A pane's border: chrome, not pane content, so no other clause claims it.
+	// (The dock band has a clause of its own now, for its controls' hover.)
+	overChrome := tea.MouseMotionMsg{X: 31, Y: 10}
 
 	if FilterMouseMotion(o, overChrome) != nil {
 		t.Fatal("motion over chrome passed with the beam off; the CPU guard is gone")
