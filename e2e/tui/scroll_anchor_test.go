@@ -81,7 +81,7 @@ func TestScrolledPaneHoldsItsPlaceUnderNewOutput(t *testing.T) {
 	waitScrolledTo(t, term, "ANCHOR", "the wheel did not scroll back through the history",
 		func(n int) bool { return n > 0 && n <= filled-40 })
 
-	before := newestVisible(term.Screen(), "ANCHOR")
+	before := settledScroll(t, term, "ANCHOR")
 	t.Logf("the newest ANCHOR line after scrolling back is %d", before)
 
 	// Let the producer run. Every one of its lines pushes the pane's history
@@ -141,7 +141,7 @@ func TestAPeersWorkspaceSwitchLeavesAScrolledPaneWhereItIs(t *testing.T) {
 	waitScrolledTo(t, a, "WSANCHOR", "the wheel did not scroll back through the history",
 		func(n int) bool { return n > 0 && n <= filled-40 })
 
-	before := newestVisible(a.Screen(), "WSANCHOR")
+	before := settledScroll(t, a, "WSANCHOR")
 	t.Logf("the newest WSANCHOR line on the scrolled client is %d", before)
 
 	// The second client makes the round trip. Nothing is typed on the first
