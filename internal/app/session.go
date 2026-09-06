@@ -829,6 +829,15 @@ func (m *OS) ApplyStateSyncFrom(state *session.SessionState, sourceID string) er
 	// panes instead of two - and on a workspace switch, which is the case that
 	// retiles, the strip it lays out is then the one this sync named. A sync
 	// that moved neither leaves it alone.
+	//
+	// And after adoptSyncedWindows above, deliberately. That retile is a
+	// recompute, not a decision, and a recompute can move the strip's offset as
+	// a side effect; the session's offset written over it here is what keeps
+	// that side effect off the wire, because the push this sync owes carries
+	// what the session said and not what the retile happened to leave. The
+	// offset stays a snapshot field a retile can write, so this ordering is the
+	// only thing telling the two apart. The end state is an op, "the user
+	// scrolled the strip to X", after which a recompute has nothing to say.
 	m.adoptScrollStrip(state.ScrollStrip, focusChanged)
 
 	// A sync carries the peer's pane rectangles, and a rectangle is not shared
