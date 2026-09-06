@@ -117,7 +117,7 @@ type Emulator struct {
 	openGrapheme openGrapheme
 
 	// The ANSI parser to use.
-	parser *ansi.Parser
+	parser *seqParser
 	// The last parser state.
 	lastState parser.State
 
@@ -175,6 +175,13 @@ type Emulator struct {
 	semanticMarkers *SemanticMarkerList
 }
 
+// maxSequenceData is the most bytes of one OSC, DCS or APC payload the
+// emulator keeps: a sixel image or a large OSC 52 clipboard write. A payload
+// past it is cut at it. The parser's buffer grows towards this on demand
+// rather than being allocated at it, so a pane pays for it only once a
+// payload that size has arrived.
+const maxSequenceData = 4 << 20
+
 // NewEmulator creates a new virtual terminal emulator.
 func NewEmulator(w, h int) *Emulator {
 	t := new(Emulator)
@@ -192,9 +199,7 @@ func NewEmulator(w, h int) *Emulator {
 	t.scr = &t.scrs[0]
 	t.scrs[0].cb = &t.cb
 	t.scrs[1].cb = &t.cb
-	t.parser = ansi.NewParser()
-	t.parser.SetParamsSize(parser.MaxParamsSize)
-	t.parser.SetDataSize(1024 * 1024 * 4) // 4MB data buffer
+	t.parser = newSeqParser(maxSequenceData)
 	t.parser.SetHandler(ansi.Handler{
 		Print:     t.handlePrint,
 		Execute:   t.handleControl,
