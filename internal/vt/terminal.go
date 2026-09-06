@@ -27,7 +27,10 @@ type Terminal interface {
 	Resize(width int, height int)
 
 	// Grid reads. CellAt addresses the active screen, MainCellAt the main
-	// screen even while the alternate screen is active.
+	// screen even while the alternate screen is active. Both hand out a
+	// pointer for reading only: a row nothing has printed on is served from
+	// one shared blank cell, and a write through the pointer would show on
+	// every blank cell of every pane. Writes go through SetCell.
 	Width() int
 	Height() int
 	Bounds() uv.Rectangle

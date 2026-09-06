@@ -9,7 +9,7 @@ type Screen struct {
 	// cb is the callbacks struct to use.
 	cb *Callbacks
 	// The buffer of the screen.
-	buf *uv.RenderBuffer
+	buf *grid
 	// The cur of the screen.
 	cur, saved Cursor
 	savedExtra savedExtras
@@ -23,7 +23,7 @@ type Screen struct {
 func NewScreen(w, h int) *Screen {
 	s := Screen{}
 	s.scrollback = NewScrollback(0) // Use default size
-	s.buf = uv.NewRenderBuffer(w, h)
+	s.buf = newGrid(w, h)
 	s.scroll = s.buf.Bounds()
 	return &s
 }
@@ -32,7 +32,7 @@ func NewScreen(w, h int) *Screen {
 // ring. Emulator.altScreen grows it to the main screen's size on first use.
 func newAltScreen() *Screen {
 	s := Screen{}
-	s.buf = uv.NewRenderBuffer(1, 1)
+	s.buf = newGrid(1, 1)
 	s.scroll = s.buf.Bounds()
 	return &s
 }
@@ -50,11 +50,6 @@ func (s *Screen) Reset() {
 // Bounds returns the bounds of the screen.
 func (s *Screen) Bounds() uv.Rectangle {
 	return s.buf.Bounds()
-}
-
-// Touched returns touched lines in the screen buffer.
-func (s *Screen) Touched() []*uv.LineData {
-	return s.buf.Touched
 }
 
 // CellAt returns the cell at the given x, y position.
@@ -102,10 +97,6 @@ func (s *Screen) Height() int {
 // Resize resizes the screen.
 func (s *Screen) Resize(width int, height int) {
 	s.buf.Resize(width, height)
-	// Resize the Touched slice to match the new height.
-	if h := s.buf.Height(); len(s.buf.Touched) != h {
-		s.buf.Touched = make([]*uv.LineData, h)
-	}
 	s.blankWideRunesCutByTheEdge()
 	s.scroll = s.buf.Bounds()
 
@@ -355,7 +346,6 @@ func (s *Screen) insertCellAt(x, y, n int) {
 		putBlank(line, i, blank)
 	}
 	repairWide(line)
-	s.buf.TouchLine(x, y, right-x)
 }
 
 // DeleteCell deletes n cells at the cursor position moving cells to the left.
@@ -380,13 +370,14 @@ func (s *Screen) DeleteCell(n int) {
 		putBlank(line, i, blank)
 	}
 	repairWide(line)
-	s.buf.TouchLine(x, y, right-x)
 }
 
 // shiftBounds validates a cell shift at (x, y) and returns the row it operates
 // on together with the count clamped to the space between x and the right
 // margin. It reports false when the position is outside the margins or the
-// screen, which is the case every caller treats as a no-op.
+// screen, which is the case every caller treats as a no-op, and also when the
+// row has never been written and the shift would only move blanks into
+// blanks.
 func (s *Screen) shiftBounds(x, y, n int) (uv.Line, int, bool) {
 	area := s.scroll
 	if n <= 0 || y < area.Min.Y || y >= area.Max.Y || y >= s.buf.Height() ||
@@ -396,7 +387,10 @@ func (s *Screen) shiftBounds(x, y, n int) (uv.Line, int, bool) {
 	if x+n > area.Max.X {
 		n = area.Max.X - x
 	}
-	return s.buf.Lines[y], n, true
+	if s.buf.Row(y) == nil && s.blankCell() == nil {
+		return nil, 0, false
+	}
+	return s.buf.row(y), n, true
 }
 
 // putBlank overwrites one column with the erase cell. Like the shift itself it
@@ -469,7 +463,7 @@ func (s *Screen) ScrollUp(n int) {
 		// and have to be copied out before DeleteLine overwrites them.
 		if save {
 			for i := 0; i < n && i < scroll.Dy(); i++ {
-				s.scrollback.PushLine(extractLine(s.buf.Buffer, scroll.Min.Y+i, width))
+				s.scrollback.PushLine(extractLine(s.buf, scroll.Min.Y+i, width))
 			}
 		}
 		s.DeleteLine(n)
@@ -501,10 +495,11 @@ func (s *Screen) ScrollUp(n int) {
 // writes; the only new part is that the screen takes back storage the ring has
 // finished with.
 //
-// Every row is marked touched, because every row's index changed and the
-// renderer diffs by index.
+// A row that has never been written is nil in the grid. It is retained as a
+// blank line of the screen's width, and it stays nil at the bottom unless the
+// blank it has to be filled with carries a background colour.
 func (s *Screen) rotateWholeScreenUp(n int, save bool) bool {
-	lines := s.buf.Lines
+	lines := s.buf.rows
 	height := len(lines)
 	area := s.scroll
 	if height == 0 || area.Min.X != 0 || area.Min.Y != 0 ||
@@ -534,25 +529,16 @@ func (s *Screen) rotateWholeScreenUp(n int, save bool) bool {
 	copy(lines, lines[n:])
 	if save {
 		for _, row := range recycled {
-			s.scrollback.PushLine(row)
+			if row == nil {
+				s.scrollback.PushBlankLine(s.buf.Width())
+			} else {
+				s.scrollback.PushLine(row)
+			}
 		}
 	}
 	copy(lines[height-n:], recycled)
 
-	blank := uv.EmptyCell
-	if c := s.blankCell(); c != nil {
-		blank = *c
-	}
-	for y := height - n; y < height; y++ {
-		row := lines[y]
-		for x := range row {
-			row[x] = blank
-		}
-	}
-
-	for y := range height {
-		s.buf.TouchLine(0, y, area.Max.X)
-	}
+	s.buf.blankRows(height-n, height, s.blankCell())
 	return true
 }
 

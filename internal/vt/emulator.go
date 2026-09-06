@@ -310,10 +310,18 @@ func clustersJoin(a, b string) bool {
 // two characters on the grid but one flag to any parser reading them back. A
 // cluster break separates such neighbours.
 func (e *Emulator) Render() string {
-	lines := e.scr.buf.Lines
+	lines := e.scr.buf.rows
+	width := e.scr.buf.Width()
 	var b strings.Builder
 	for i, line := range lines {
-		renderRowBreakingClusters(&b, line)
+		if line == nil {
+			// A row nothing has written renders as the blanks it holds.
+			for range width {
+				b.WriteByte(' ')
+			}
+		} else {
+			renderRowBreakingClusters(&b, line)
+		}
 		if i < len(lines)-1 {
 			b.WriteByte('\n')
 		}

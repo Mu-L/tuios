@@ -1,7 +1,9 @@
 package vt
 
 import (
+	"encoding/binary"
 	"image/color"
+	"math/rand"
 	"reflect"
 	"runtime"
 	"testing"
@@ -18,12 +20,29 @@ func (c oddColor) RGBA() (r, g, b, a uint32) {
 	return uint32(c.v) * 0x101, 0, 0, 0xffff
 }
 
-func TestPackedCellIs24Bytes(t *testing.T) {
-	if got := unsafe.Sizeof(packedCell{}); got != 24 {
-		t.Fatalf("packedCell is %d bytes, want 24", got)
-	}
+func TestUVCellIsStillLarge(t *testing.T) {
 	if got := unsafe.Sizeof(uv.Cell{}); got < 100 {
-		t.Fatalf("uv.Cell is %d bytes; the packing exists because it was 112", got)
+		t.Fatalf("uv.Cell is %d bytes; the encoding exists because it was 112", got)
+	}
+}
+
+// TestPlainLineCostsItsTextInBytes pins the point of the encoding: a line of
+// plain text is stored as that text, one byte per ASCII cell plus the width
+// header, not 24 bytes per cell.
+func TestPlainLineCostsItsTextInBytes(t *testing.T) {
+	const width = 207
+	text := "compiling package github.com/example/project/internal/thing"
+	line := make(uv.Line, width)
+	for i := range line {
+		line[i] = uv.EmptyCell
+	}
+	for i, r := range text {
+		line[i] = uv.Cell{Content: string(r), Width: 1}
+	}
+	sb := NewScrollback(4)
+	sb.PushLine(line)
+	if got, want := len(sb.lines[0]), len(text)+2; got != want {
+		t.Fatalf("a %d-character plain line is stored in %d bytes, want %d (text plus a two-byte width)", len(text), got, want)
 	}
 }
 
@@ -65,11 +84,14 @@ func TestScrollbackRoundTripsEveryKindOfCell(t *testing.T) {
 			t.Errorf("cell %d: got %#v, want %#v", x, got[x], want[x])
 		}
 	}
-	if stored := len(sb.lines[0].cells); stored != 14 {
-		t.Errorf("stored %d cells, want 14: the blank tail is not stored", stored)
+	if got, ok := storedCellWidth(sb.lines[0], 13); !ok || got != 1 {
+		t.Errorf("cell 13 is stored with width %d (%v), want 1", got, ok)
 	}
-	if stored := sb.lines[0].width; stored != width {
-		t.Errorf("stored width %d, want %d", stored, width)
+	if _, ok := storedCellWidth(sb.lines[0], 14); ok {
+		t.Errorf("cell 14 is stored: the blank tail is not stored")
+	}
+	if w, _ := binary.Uvarint(sb.lines[0]); int(w) != width {
+		t.Errorf("stored width %d, want %d", w, width)
 	}
 }
 
@@ -171,4 +193,102 @@ func TestPackedScrollbackHoldsALineForItsContent(t *testing.T) {
 		t.Fatalf("%d lines of %d columns hold %d bytes, want under a tenth of the %d the unpacked cells took", lines, width, held, unpacked)
 	}
 	t.Logf("%d lines x %d columns, five cells each: %d KiB packed, %d KiB unpacked", lines, width, held/1024, unpacked/1024)
+}
+
+// TestScrollbackRoundTripsRandomLines pushes lines built from every kind of
+// cell in random order, through a ring that wraps, and reads each back. The
+// one-of-each line above pins the encoding of each cell; this pins that the
+// style and link runs the encoding shares between cells come back on the
+// right cells whatever the neighbours are.
+func TestScrollbackRoundTripsRandomLines(t *testing.T) {
+	rng := rand.New(rand.NewSource(1))
+	colors := []color.Color{nil, ansi.BasicColor(1), ansi.IndexedColor(99), ansi.TrueColor(0xabcdef),
+		color.RGBA{R: 1, G: 2, B: 3, A: 255}, color.RGBA{R: 4, G: 5, B: 6, A: 7}, oddColor{3}, oddColor{200}}
+	links := []uv.Link{{}, {URL: "https://a.test"}, {URL: "https://b.test", Params: "id=2"}}
+	contents := []string{" ", "a", "Z", "é", "漢", "🇬🇧", "é", "�", "\x00", "\xff", "", "ab"}
+	randomCell := func() uv.Cell {
+		c := uv.Cell{Content: contents[rng.Intn(len(contents))], Width: 1}
+		switch c.Content {
+		case "漢", "🇬🇧":
+			c.Width = 2
+		case "":
+			c.Width = 0
+		}
+		if rng.Intn(4) == 0 {
+			c.Width = rng.Intn(4)
+		}
+		if rng.Intn(3) == 0 {
+			c.Style = uv.Style{
+				Fg: colors[rng.Intn(len(colors))], Bg: colors[rng.Intn(len(colors))],
+				UnderlineColor: colors[rng.Intn(len(colors))],
+				Underline:      uv.Underline(rng.Intn(6)), Attrs: uint8(rng.Intn(256)),
+			}
+		}
+		if rng.Intn(5) == 0 {
+			c.Link = links[rng.Intn(len(links))]
+		}
+		return c
+	}
+
+	const ring = 37
+	sb := NewScrollback(ring)
+	var pushed []uv.Line
+	for range 500 {
+		width := 1 + rng.Intn(60)
+		line := make(uv.Line, width)
+		for x := range line {
+			line[x] = uv.EmptyCell
+		}
+		filled := rng.Intn(width + 1)
+		for x := range filled {
+			line[x] = randomCell()
+		}
+		sb.PushLine(line)
+		pushed = append(pushed, line)
+		if len(pushed) > ring {
+			pushed = pushed[1:]
+		}
+		if got := sb.Len(); got != len(pushed) {
+			t.Fatalf("ring holds %d lines, want %d", got, len(pushed))
+		}
+		i := rng.Intn(len(pushed))
+		got := sb.Line(i)
+		if !reflect.DeepEqual(got, pushed[i]) {
+			for x := range pushed[i] {
+				if x < len(got) && !reflect.DeepEqual(got[x], pushed[i][x]) {
+					t.Fatalf("line %d cell %d: got %#v, want %#v", i, x, got[x], pushed[i][x])
+				}
+			}
+			t.Fatalf("line %d: got %d cells, want %d", i, len(got), len(pushed[i]))
+		}
+	}
+}
+
+// TestScrollbackRingGrowsAsLinesArrive pins that an empty ring holds no
+// line headers: at the default depth the headers alone were 320 KB per pane
+// before the pane had printed anything, on each side of the socket.
+func TestScrollbackRingGrowsAsLinesArrive(t *testing.T) {
+	sb := NewScrollback(10000)
+	if sb.lines != nil {
+		t.Fatalf("a new ring holds %d line slots, want none", cap(sb.lines))
+	}
+	line := uv.Line{{Content: "x", Width: 1}}
+	for range 100 {
+		sb.PushLine(line)
+	}
+	if cap(sb.lines) > 1000 {
+		t.Fatalf("after 100 lines the ring has room for %d, want it to grow with use", cap(sb.lines))
+	}
+	for range 10000 {
+		sb.PushLine(line)
+	}
+	if got := sb.Len(); got != 10000 {
+		t.Fatalf("ring holds %d lines, want 10000", got)
+	}
+	if got := cap(sb.lines); got != 10000 {
+		t.Fatalf("a full ring has room for %d lines, want exactly 10000", got)
+	}
+	if got := sb.Line(0)[0].Content; got != "x" {
+		t.Fatalf("oldest line is %q, want x", got)
+	}
 }

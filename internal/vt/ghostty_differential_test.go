@@ -241,6 +241,12 @@ func TestGhosttyDiffBasicSequences(t *testing.T) {
 		{"tabs", "a\tb\tc"},
 		{"reverse-video", "\x1b[7minv\x1b[27mnorm"},
 		{"insert-line", "a\r\nb\r\nc\x1b[2;1H\x1b[L"},
+		// Every row holds text, so the rows a line shift pushes off carry
+		// something and the rows it opens have to come out blank.
+		{"insert-line-over-text", "a\r\nb\r\nc\r\nd\r\ne\x1b[2;1H\x1b[2L"},
+		{"delete-line-over-text", "a\r\nb\r\nc\r\nd\r\ne\x1b[2;1H\x1b[2M"},
+		{"region-delete-line-over-text", "a\r\nb\r\nc\r\nd\r\ne\x1b[2;4r\x1b[2;1H\x1b[M\x1b[r"},
+		{"region-scroll-over-text", "a\r\nb\r\nc\r\nd\r\ne\x1b[2;4r\x1b[4;1H\n\n\x1b[r"},
 		{"delete-char", "abcdef\x1b[1;2H\x1b[2P"},
 		{"alt-screen", "main\x1b[?1049htop\x1b[?1049l"},
 		{"scroll-region", "\x1b[2;4rA\r\nB\r\nC\r\nD\r\nE\x1b[r"},

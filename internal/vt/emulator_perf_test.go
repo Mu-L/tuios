@@ -2,6 +2,7 @@ package vt_test
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -152,23 +153,25 @@ func BenchmarkEmulatorRenderReal(b *testing.B) {
 
 // BenchmarkScrollbackRetainedMemory reports how much heap one window's
 // scrollback holds, which is a memory figure rather than a speed one and is
-// why it reports a custom metric instead of leaning on ns/op.
+// why it reports custom metrics instead of leaning on ns/op.
 //
 // It is here because the number is large enough to matter for a program the
-// user leaves open all day. At 207 columns each retained line costs on the
-// order of 25KB, against roughly 175 bytes of actual text, because a
-// scrollback line is a full slice of cell structs carrying content strings,
+// user leaves open all day. At 207 columns each retained line once cost on
+// the order of 25KB, against roughly 175 bytes of actual text, because a
+// scrollback line was a full slice of cell structs carrying content strings,
 // style interfaces and link data for every column, whether or not the column
-// holds anything. The default scrollback is 10000 lines, so one window with a
-// filled buffer holds a couple of hundred megabytes, and the configuration
-// permits 1000000 lines.
+// held anything. The default scrollback is 10000 lines, so one window with a
+// filled buffer held a couple of hundred megabytes, and the configuration
+// permits 1000000 lines. The retained-bytes/line metric is the live heap the
+// filled ring holds divided by its lines, measured after a collection.
 func BenchmarkScrollbackRetainedMemory(b *testing.B) {
 	const lines = 2000
+	line := []byte(strings.Repeat("output line with some length to it ", 5) + "\r\n")
 
+	var emu *vt.Emulator
 	for b.Loop() {
-		emu := vt.NewEmulator(perfCols, perfRows)
+		emu = vt.NewEmulator(perfCols, perfRows)
 		emu.SetScrollbackMaxLines(lines)
-		line := []byte(strings.Repeat("output line with some length to it ", 5) + "\r\n")
 		for range lines + perfRows {
 			_, _ = emu.Write(line)
 		}
@@ -176,5 +179,23 @@ func BenchmarkScrollbackRetainedMemory(b *testing.B) {
 			b.Fatalf("scrollback holds %d lines, want %d", got, lines)
 		}
 	}
+	b.StopTimer()
+
+	// Two collections before each reading: one is not always enough for
+	// what the loop left behind to be gone, and that showed up as bytes
+	// charged to the ring.
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	emu.ClearScrollback()
+	runtime.GC()
+	runtime.GC()
+	runtime.ReadMemStats(&after)
+	// Without this the emulator is dead after the clear and the second
+	// reading sees its grid collected too.
+	runtime.KeepAlive(emu)
+	held := int64(before.HeapAlloc) - int64(after.HeapAlloc)
 	b.ReportMetric(float64(lines), "retained-lines")
+	b.ReportMetric(float64(held)/lines, "retained-bytes/line")
 }
