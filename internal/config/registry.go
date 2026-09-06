@@ -11,6 +11,33 @@ type KeybindRegistry struct {
 	keyToAction map[string]string // Maps key string to action name
 	config      *UserConfig
 	normalizer  *KeyNormalizer
+
+	// sections holds one resolved key->action map per config section that is
+	// looked up on its own rather than through keyToAction: every prefix, the
+	// global and script scopes, the direct terminal-mode binds and the rail.
+	//
+	// They used to be rebuilt from the config on every lookup, which meant
+	// every letter typed into a shell sorted the terminal-mode section, ran
+	// the normalizer over each of its keys and allocated a fresh map, three or
+	// four times over as the key passed each gate on its way to the PTY.
+	// Measured at 177 allocations and 19 us per typed key against 7 and 0.65
+	// us for a window-mode key that reads the flattened map. A binding is
+	// resolved once here, at build time, and read per key like the rest.
+	//
+	// The maps are as stale as keyToAction is, and for the same reason: the
+	// config is edited in place by the keybind manager and the unbind
+	// commands, and each of those calls Reload when it is done. A section
+	// changed without a Reload is not seen by any lookup, which was already
+	// true of the seven flattened sections.
+	sections sectionMaps
+}
+
+// sectionMaps is the resolved form of every section the registry reads on its
+// own. One field per section, so a lookup is a field read and a map access.
+type sectionMaps struct {
+	prefix, windowPrefix, minimizePrefix, workspacePrefix map[string]string
+	debugPrefix, tapePrefix, layoutPrefix                 map[string]string
+	terminalMode, global, script, sidebar, sidebarFiles   map[string]string
 }
 
 // NewKeybindRegistry creates a new keybind registry from config
@@ -44,6 +71,22 @@ func (r *KeybindRegistry) buildMappings() {
 	// - WindowPrefix (used after Ctrl+B, t)
 	// - MinimizePrefix (used after Ctrl+B, m)
 	// - WorkspacePrefix (used after Ctrl+B, w)
+	// They are resolved here all the same, once, into their own maps.
+	kb := &r.config.Keybindings
+	r.sections = sectionMaps{
+		prefix:          r.sectionKeyMap(kb.PrefixMode),
+		windowPrefix:    r.sectionKeyMap(kb.WindowPrefix),
+		minimizePrefix:  r.sectionKeyMap(kb.MinimizePrefix),
+		workspacePrefix: r.sectionKeyMap(kb.WorkspacePrefix),
+		debugPrefix:     r.sectionKeyMap(kb.DebugPrefix),
+		tapePrefix:      r.sectionKeyMap(kb.TapePrefix),
+		layoutPrefix:    r.sectionKeyMap(kb.LayoutPrefix),
+		terminalMode:    r.sectionKeyMap(kb.TerminalMode),
+		global:          r.sectionKeyMap(kb.Global),
+		script:          r.sectionKeyMap(kb.Script),
+		sidebar:         r.sectionKeyMap(kb.Sidebar),
+		sidebarFiles:    r.sectionKeyMap(kb.SidebarFiles),
+	}
 }
 
 // addSection adds all keybindings from a section to the registry. Later
@@ -90,32 +133,32 @@ func (r *KeybindRegistry) GetAction(key string) string {
 
 // GetPrefixAction returns the action name for a given key in the main prefix mode (Ctrl+B)
 func (r *KeybindRegistry) GetPrefixAction(key string) string {
-	return r.lookupKeyInSection(key, r.config.Keybindings.PrefixMode)
+	return r.lookupKey(key, r.sections.prefix)
 }
 
 // GetWindowPrefixAction returns the action name for a given key in window prefix mode (Ctrl+B, t)
 func (r *KeybindRegistry) GetWindowPrefixAction(key string) string {
-	return r.lookupKeyInSection(key, r.config.Keybindings.WindowPrefix)
+	return r.lookupKey(key, r.sections.windowPrefix)
 }
 
 // GetMinimizePrefixAction returns the action name for a given key in minimize prefix mode (Ctrl+B, m)
 func (r *KeybindRegistry) GetMinimizePrefixAction(key string) string {
-	return r.lookupKeyInSection(key, r.config.Keybindings.MinimizePrefix)
+	return r.lookupKey(key, r.sections.minimizePrefix)
 }
 
 // GetWorkspacePrefixAction returns the action name for a given key in workspace prefix mode (Ctrl+B, w)
 func (r *KeybindRegistry) GetWorkspacePrefixAction(key string) string {
-	return r.lookupKeyInSection(key, r.config.Keybindings.WorkspacePrefix)
+	return r.lookupKey(key, r.sections.workspacePrefix)
 }
 
 // GetDebugPrefixAction returns the action name for a given key in debug prefix mode (Ctrl+B, D)
 func (r *KeybindRegistry) GetDebugPrefixAction(key string) string {
-	return r.lookupKeyInSection(key, r.config.Keybindings.DebugPrefix)
+	return r.lookupKey(key, r.sections.debugPrefix)
 }
 
 // GetTapePrefixAction returns the action name for a given key in tape prefix mode (Ctrl+B, T)
 func (r *KeybindRegistry) GetTapePrefixAction(key string) string {
-	return r.lookupKeyInSection(key, r.config.Keybindings.TapePrefix)
+	return r.lookupKey(key, r.sections.tapePrefix)
 }
 
 // GetGlobalAction returns the action name for a key in the global scope, the
@@ -123,25 +166,25 @@ func (r *KeybindRegistry) GetTapePrefixAction(key string) string {
 // buildMappings so a global bind cannot be overwritten by a same-key bind in one
 // of the seven flattened window-mode sections.
 func (r *KeybindRegistry) GetGlobalAction(key string) string {
-	return r.lookupKeyInSection(key, r.config.Keybindings.Global)
+	return r.lookupKey(key, r.sections.global)
 }
 
 // GetScriptAction returns the action name for a key while a tape script is
 // playing back.
 func (r *KeybindRegistry) GetScriptAction(key string) string {
-	return r.lookupKeyInSection(key, r.config.Keybindings.Script)
+	return r.lookupKey(key, r.sections.script)
 }
 
 // GetLayoutPrefixAction returns the action name for a given key in layout prefix
 // mode (Ctrl+B, L).
 func (r *KeybindRegistry) GetLayoutPrefixAction(key string) string {
-	return r.lookupKeyInSection(key, r.config.Keybindings.LayoutPrefix)
+	return r.lookupKey(key, r.sections.layoutPrefix)
 }
 
 // GetTerminalModeAction returns the action name for a given key among the
 // direct terminal-mode binds (no prefix required).
 func (r *KeybindRegistry) GetTerminalModeAction(key string) string {
-	return r.lookupKeyInSection(key, r.config.Keybindings.TerminalMode)
+	return r.lookupKey(key, r.sections.terminalMode)
 }
 
 // GetSidebarAction returns the action name for a given key in the rail's
@@ -149,7 +192,7 @@ func (r *KeybindRegistry) GetTerminalModeAction(key string) string {
 // keymap so rail keys (j/k/h/l/enter) never fire on a pane; only consulted while
 // SidebarFocused.
 func (r *KeybindRegistry) GetSidebarAction(key string) string {
-	return r.lookupKeyInSection(key, r.config.Keybindings.Sidebar)
+	return r.lookupKey(key, r.sections.sidebar)
 }
 
 // GetSidebarFilesAction returns the action name for a key among the files
@@ -157,7 +200,7 @@ func (r *KeybindRegistry) GetSidebarAction(key string) string {
 // rail's cursor is on a row of the listing, so the three keys the two sections
 // share each mean the thing the row under the cursor is.
 func (r *KeybindRegistry) GetSidebarFilesAction(key string) string {
-	return r.lookupKeyInSection(key, r.config.Keybindings.SidebarFiles)
+	return r.lookupKey(key, r.sections.sidebarFiles)
 }
 
 // GetSidebarFilesKeys is GetKeys for the files section's binds, for the help
@@ -171,11 +214,6 @@ func (r *KeybindRegistry) GetSidebarFilesKeys(action string) []string {
 // so the help overlay needs its own way to read what the rail is bound to.
 func (r *KeybindRegistry) GetSidebarKeys(action string) []string {
 	return r.config.Keybindings.Sidebar[action]
-}
-
-// lookupKeyInSection looks up a key in a specific config section
-func (r *KeybindRegistry) lookupKeyInSection(key string, section map[string][]string) string {
-	return r.lookupKey(key, r.sectionKeyMap(section))
 }
 
 // lookupKey performs the actual key lookup with case handling
