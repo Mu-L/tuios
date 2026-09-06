@@ -487,7 +487,7 @@ func init() {
 			description: "Run one tape command (the command names the keybindings use). Prefer a verb where one exists: a verb reports what changed, this reports only that the command ran.",
 			params: []verbParam{
 				sessionParam,
-				{Name: "command", Type: "string", Required: true, Description: `Tape command name, e.g. "ToggleZoom" or "SnapLeft".`},
+				{Name: "command", Type: "string", Required: true, Description: `Tape command name, e.g. "ToggleZoom" or "SnapLeft". The keymap's name for the same action, e.g. "toggle_zoom", is accepted too.`},
 				{Name: "args", Type: "[]string", Description: "Arguments for the command."},
 			},
 			returns: []verbParam{

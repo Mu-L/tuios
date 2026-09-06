@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // CommandType represents the type of a tape command
@@ -175,35 +176,118 @@ func (c *Command) String() string {
 	}
 }
 
+// commandTypes is every command a tape or a remote caller can run. IsCommand
+// and ResolveCommandName both read it, so a command added here is known to
+// both at once.
+var commandTypes = []CommandType{
+	CommandTypeType,
+	CommandTypeSleep,
+	CommandTypeEnter,
+	CommandTypeSpace,
+	CommandTypeBackspace,
+	CommandTypeDelete,
+	CommandTypeTab,
+	CommandTypeEscape,
+	CommandTypeUp,
+	CommandTypeDown,
+	CommandTypeLeft,
+	CommandTypeRight,
+	CommandTypeHome,
+	CommandTypeEnd,
+	CommandTypeKeyCombo,
+	CommandTypeTerminalMode,
+	CommandTypeWindowManagementMode,
+	CommandTypeNewWindow,
+	CommandTypeCloseWindow,
+	CommandTypeNextWindow,
+	CommandTypePrevWindow,
+	CommandTypeFocusWindow,
+	CommandTypeRenameWindow,
+	CommandTypeMinimizeWindow,
+	CommandTypeRestoreWindow,
+	CommandTypeToggleTiling,
+	CommandTypeEnableTiling,
+	CommandTypeDisableTiling,
+	CommandTypeSnapLeft,
+	CommandTypeSnapRight,
+	CommandTypeSnapFullscreen,
+	CommandTypeSwitchWS,
+	CommandTypeMoveToWS,
+	CommandTypeMoveAndFollowWS,
+	CommandTypeSplit,
+	CommandTypeFocus,
+	CommandTypeRotateSplit,
+	CommandTypeEqualizeSplits,
+	CommandTypePreselect,
+	CommandTypeWait,
+	CommandTypeWaitUntilRegex,
+	CommandTypeSet,
+	CommandTypeOutput,
+	CommandTypeSource,
+	CommandTypeEnableAnimations,
+	CommandTypeDisableAnimations,
+	CommandTypeToggleAnimations,
+	CommandTypeComment,
+	CommandTypeSetConfig,
+	CommandTypeSetTheme,
+	CommandTypeSetDockbarPosition,
+	CommandTypeSetBorderStyle,
+	CommandTypeShowNotification,
+	CommandTypeFocusDirection,
+	CommandTypeToggleZoom,
+	CommandTypeScreenshot,
+	CommandTypeSmartSplit,
+	CommandTypeCommandPalette,
+	CommandTypeSaveLayout,
+	CommandTypeLoadLayout,
+}
+
+// commandTypeSet is commandTypes as a set, and commandTypesByKey is the same
+// commands keyed by their normalized name (see commandKey), which is what lets
+// a caller outside a tape name one the way the keymap does.
+var (
+	commandTypeSet    = make(map[CommandType]bool, len(commandTypes))
+	commandTypesByKey = make(map[string]CommandType, len(commandTypes))
+)
+
+func init() {
+	for _, ct := range commandTypes {
+		commandTypeSet[ct] = true
+		commandTypesByKey[commandKey(string(ct))] = ct
+	}
+}
+
+// commandKey folds a command name for lookup: case and the separators a
+// keymap name uses are dropped, so "ToggleTiling", "toggletiling" and
+// "toggle_tiling" are one key.
+func commandKey(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		if r == '_' || r == '-' || r == ' ' {
+			continue
+		}
+		b.WriteRune(unicode.ToLower(r))
+	}
+	return b.String()
+}
+
 // IsCommand returns true if the command type is a valid command
 func (ct CommandType) IsCommand() bool {
-	switch ct {
-	case CommandTypeType, CommandTypeSleep, CommandTypeEnter, CommandTypeSpace,
-		CommandTypeBackspace, CommandTypeDelete, CommandTypeTab, CommandTypeEscape,
-		CommandTypeUp, CommandTypeDown, CommandTypeLeft, CommandTypeRight,
-		CommandTypeHome, CommandTypeEnd, CommandTypeKeyCombo,
-		CommandTypeTerminalMode, CommandTypeWindowManagementMode,
-		CommandTypeNewWindow, CommandTypeCloseWindow, CommandTypeNextWindow,
-		CommandTypePrevWindow, CommandTypeFocusWindow, CommandTypeRenameWindow,
-		CommandTypeMinimizeWindow, CommandTypeRestoreWindow,
-		CommandTypeToggleTiling, CommandTypeEnableTiling, CommandTypeDisableTiling,
-		CommandTypeSnapLeft, CommandTypeSnapRight, CommandTypeSnapFullscreen,
-		CommandTypeSwitchWS, CommandTypeMoveToWS, CommandTypeMoveAndFollowWS,
-		CommandTypeSplit, CommandTypeFocus, CommandTypeRotateSplit,
-		CommandTypeEqualizeSplits, CommandTypePreselect,
-		CommandTypeWait, CommandTypeWaitUntilRegex,
-		CommandTypeSet, CommandTypeOutput, CommandTypeSource,
-		CommandTypeEnableAnimations, CommandTypeDisableAnimations, CommandTypeToggleAnimations,
-		CommandTypeComment,
-		// Config commands
-		CommandTypeSetConfig, CommandTypeSetTheme, CommandTypeSetDockbarPosition,
-		CommandTypeSetBorderStyle, CommandTypeShowNotification, CommandTypeFocusDirection,
-		// New feature commands
-		CommandTypeToggleZoom, CommandTypeScreenshot, CommandTypeSmartSplit, CommandTypeCommandPalette,
-		CommandTypeSaveLayout, CommandTypeLoadLayout:
-		return true
+	return commandTypeSet[ct]
+}
+
+// ResolveCommandName returns the command a name from outside a tape refers
+// to: the tape's own name ("ToggleTiling"), that name in any case, or the
+// name the keymap gives the same action ("toggle_tiling"). run-command is the
+// escape hatch for a binding with no verb, and a binding is known by its
+// keymap name, so that spelling has to reach the same command. A name that is
+// none of these is reported rather than run as nothing.
+func ResolveCommandName(name string) (CommandType, bool) {
+	if ct := CommandType(name); ct.IsCommand() {
+		return ct, true
 	}
-	return false
+	ct, ok := commandTypesByKey[commandKey(name)]
+	return ct, ok
 }
 
 // ParseDuration parses a duration string (e.g., "500ms", "1s")
