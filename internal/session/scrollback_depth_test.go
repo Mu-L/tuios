@@ -42,10 +42,12 @@ func TestScrollbackLinesReachesTheDaemon(t *testing.T) {
 }
 
 // TestDaemonPanesKeepTheConfiguredScrollback makes a pane in a session with a
-// depth and checks the emulator behind it keeps exactly that many lines. The
-// daemon used to make every pane with ten thousand whatever the user set.
+// depth and checks the emulator behind it keeps about that many lines. The
+// daemon used to make every pane with ten thousand whatever the user set. The
+// pure ring lands on the depth exactly; libghostty prunes whole pages, so it
+// lands near it, and the check allows that on both.
 func TestDaemonPanesKeepTheConfiguredScrollback(t *testing.T) {
-	const depth = 150
+	const depth = 1000
 	sess, err := NewSession("depth", &SessionConfig{ScrollbackLines: depth}, 80, 24)
 	if err != nil {
 		t.Fatal(err)
@@ -58,7 +60,7 @@ func TestDaemonPanesKeepTheConfiguredScrollback(t *testing.T) {
 	defer pty.Close()
 
 	pty.terminalMu.Lock()
-	for i := range 400 {
+	for i := range 5 * depth {
 		if _, err := pty.terminal.Write(fmt.Appendf(nil, "line %d\r\n", i)); err != nil {
 			pty.terminalMu.Unlock()
 			t.Fatal(err)
@@ -66,7 +68,7 @@ func TestDaemonPanesKeepTheConfiguredScrollback(t *testing.T) {
 	}
 	got := pty.terminal.ScrollbackLen()
 	pty.terminalMu.Unlock()
-	if got != depth {
-		t.Fatalf("the daemon's emulator keeps %d lines, want the configured %d", got, depth)
+	if got < depth*7/10 || got > depth*12/10 {
+		t.Fatalf("the daemon's emulator keeps %d lines, want about the configured %d", got, depth)
 	}
 }
