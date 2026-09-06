@@ -115,3 +115,28 @@ func titleRowWithDots(s tuitest.Screen) string {
 	}
 	return ""
 }
+
+// TestTheDockChipTracksTiling pins tilingModeIcon against the real binary.
+// Every enableTiling and disableTiling in this package decides whether to press
+// a key by searching the screen for that glyph, so a glyph that moved or
+// changed would turn a hundred assertions into silent no-ops rather than into
+// failures. This is the one test that would fail instead.
+func TestTheDockChipTracksTiling(t *testing.T) {
+	term, _ := start(t, startOpts{cols: 120, rows: 40})
+	waitBoot(t, term)
+	newWindow(t, term)
+	waitWindowCount(t, term, 1, "one window")
+
+	// It ships tiled, so the chip is there before anything is pressed.
+	if !settledTiling(t, term) {
+		t.Fatalf("the dock chip does not report the tiled session tuios ships\n%s", term.Snapshot())
+	}
+	disableTiling(t, term)
+	if settledTiling(t, term) {
+		t.Errorf("the chip still reports tiling after it was turned off\n%s", term.Snapshot())
+	}
+	enableTiling(t, term)
+	if !settledTiling(t, term) {
+		t.Errorf("the chip does not report tiling after it was turned back on\n%s", term.Snapshot())
+	}
+}

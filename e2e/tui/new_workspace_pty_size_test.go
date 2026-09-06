@@ -70,9 +70,7 @@ func TestNewWindowOnNewWorkspaceGetsPaneSize(t *testing.T) {
 
 	// Tiling on, so a lone window fills its workspace and the expected size is
 	// unambiguous.
-	if err := term.SendKeys("t"); err != nil {
-		t.Fatalf("toggle tiling: %v", err)
-	}
+	enableTiling(t, term)
 
 	newWindow(t, term)
 	enterTerminalMode(t, term)

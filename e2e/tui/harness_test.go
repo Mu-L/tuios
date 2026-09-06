@@ -850,10 +850,52 @@ func mouseHover(t *testing.T, term *tuitest.Terminal, col, row int) {
 	})
 }
 
-// enableTiling toggles tiling on and waits for the layout to actually be tiled,
-// which it establishes by requiring every pane's marker to be on screen at the
-// same time. Floating windows overlap, so only the topmost one's content shows;
-// tiled windows all show at once.
+// tilingModeIcon is the dock mode chip's tiling glyph, config.DockModeIconTiling
+// (nf-fa-th). The chip carries it for as long as the session is tiled and drops
+// it the moment tiling goes off, so it is a state, not an event, and it is what
+// this file reads to answer "is this session tiled" without pressing anything.
+//
+// It is spelled out rather than imported because this module does not depend on
+// the one under test. Nothing else in the app draws it, and no notification
+// contains it, so a plain search of the screen is unambiguous. TestTilingChip
+// pins it against the real binary.
+const tilingModeIcon = "\uf00a"
+
+// tilingIsOn reports whether the dock says the session is tiled.
+func tilingIsOn(s tuitest.Screen) bool {
+	return strings.Contains(s.Text(), tilingModeIcon)
+}
+
+// settledTiling reads the tiling state once the same answer has come back
+// twice, because a single read can catch a half-drawn dock. That is the trap
+// settledWindowCount documents, and it matters more here: the answer decides
+// whether a key is pressed at all, so a transient misread does not correct
+// itself, it toggles the session the wrong way.
+func settledTiling(t *testing.T, term *tuitest.Terminal) bool {
+	t.Helper()
+	prev, seen := false, false
+	deadline := time.Now().Add(uiTimeout)
+	for time.Now().Before(deadline) {
+		now := tilingIsOn(term.Screen())
+		if seen && now == prev {
+			return now
+		}
+		prev, seen = now, true
+		time.Sleep(60 * time.Millisecond)
+	}
+	t.Fatalf("the dock never settled on a tiling state\n%s", term.Snapshot())
+	return false
+}
+
+// enableTiling leaves the session tiled and waits for the layout to actually be
+// tiled, which with markers it establishes by requiring every pane's marker to
+// be on screen at the same time. Floating windows overlap, so only the topmost
+// one's content shows; tiled windows all show at once.
+//
+// It is not a toggle. startup.tiled ships on, so a session can already be tiled
+// when this is called, and pressing the key would turn it off; no caller ever
+// wanted that. Every caller wants to be tiled when this returns, which is what
+// it now promises and checks.
 //
 // When markers are given this deliberately does not wait for the "Tiling Mode
 // Enabled" message: with several windows open the relayout is the thing under
@@ -866,30 +908,60 @@ func mouseHover(t *testing.T, term *tuitest.Terminal, col, row int) {
 // silently vacuous assertion in TestFocusCycleWithRapidKeyRepeat.
 func enableTiling(t *testing.T, term *tuitest.Terminal, markers ...string) {
 	t.Helper()
-	if len(markers) == 0 {
-		// notifications linger for config.NotificationDuration (6s), so this is
-		// the budget for an earlier one to expire. In practice it is already
-		// gone and this returns immediately.
-		if err := term.WaitFor(func(s tuitest.Screen) bool {
-			return !strings.Contains(s.Text(), "Tiling o")
-		}, 10*time.Second); err != nil {
-			t.Fatalf("a tiling message from an earlier step never cleared, so waiting "+
-				"for this one would prove nothing: %v\n%s", err, term.Snapshot())
+	if !settledTiling(t, term) {
+		if len(markers) == 0 {
+			// notifications linger for config.NotificationDuration (6s), so this is
+			// the budget for an earlier one to expire. In practice it is already
+			// gone and this returns immediately.
+			if err := term.WaitFor(func(s tuitest.Screen) bool {
+				return !strings.Contains(s.Text(), "Tiling o")
+			}, 10*time.Second); err != nil {
+				t.Fatalf("a tiling message from an earlier step never cleared, so waiting "+
+					"for this one would prove nothing: %v\n%s", err, term.Snapshot())
+			}
 		}
+		if err := term.SendKeys("t"); err != nil {
+			t.Fatalf("toggle tiling: %v", err)
+		}
+		if len(markers) == 0 {
+			if err := term.WaitForText("Tiling on", uiTimeout); err != nil {
+				t.Fatalf("tiling was never enabled: %v\n%s", err, term.Snapshot())
+			}
+		}
+	}
+	if len(markers) > 0 {
+		if err := term.WaitFor(func(s tuitest.Screen) bool {
+			return screenHas(s, markers...)
+		}, uiTimeout); err != nil {
+			t.Fatalf("layout never became tiled (markers %v not all visible together): %v\n%s",
+				markers, err, term.Snapshot())
+		}
+	}
+	if !settledTiling(t, term) {
+		t.Fatalf("the dock still says the session is not tiled\n%s", term.Snapshot())
+	}
+}
+
+// disableTiling is enableTiling's other half: it leaves the session floating,
+// and presses nothing when it already is. A test that wants to watch the "t"
+// key turn tiling on calls this first, so the press it then makes starts from a
+// state it chose rather than from the shipped default.
+func disableTiling(t *testing.T, term *tuitest.Terminal) {
+	t.Helper()
+	if !settledTiling(t, term) {
+		return
 	}
 	if err := term.SendKeys("t"); err != nil {
 		t.Fatalf("toggle tiling: %v", err)
 	}
-	if len(markers) == 0 {
-		if err := term.WaitForText("Tiling on", uiTimeout); err != nil {
-			t.Fatalf("tiling was never enabled: %v\n%s", err, term.Snapshot())
-		}
-		return
+	if err := term.WaitForText("Tiling off", uiTimeout); err != nil {
+		t.Fatalf("tiling was never turned off: %v\n%s", err, term.Snapshot())
 	}
+	// And the message has to clear, or the caller's own wait for the next
+	// tiling message would be satisfied by this one.
 	if err := term.WaitFor(func(s tuitest.Screen) bool {
-		return screenHas(s, markers...)
-	}, uiTimeout); err != nil {
-		t.Fatalf("layout never became tiled (markers %v not all visible together): %v\n%s",
-			markers, err, term.Snapshot())
+		return !strings.Contains(s.Text(), "Tiling o")
+	}, 10*time.Second); err != nil {
+		t.Fatalf("the tiling-off message never cleared: %v\n%s", err, term.Snapshot())
 	}
 }

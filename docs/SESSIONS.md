@@ -64,7 +64,7 @@ ships on. A daemon that will not start does not leave you without a terminal:
 `tuios` says so and runs the session standalone for that one run.
 
 An install that already has a config file keeps what that file says. The
-[startup] booleans are only read from the file, so `tuios` on an existing
+`[startup]` booleans are only read from the file, so `tuios` on an existing
 machine goes on doing what it did.
 
 A daemon session lives in a separate `tuios` daemon process. The daemon owns the

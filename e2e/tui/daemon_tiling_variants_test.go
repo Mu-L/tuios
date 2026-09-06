@@ -32,13 +32,17 @@ func assertTiled(t *testing.T, rects []winRect, cols int) {
 // Variant B: attach, enable tiling via the daemon verb FIRST (while 0 windows),
 // then create windows through the daemon verb. Stresses placeUnplacedWindows +
 // adoptSyncedWindows for windows arriving into an already-tiled session.
+//
+// EnableTiling, not ToggleTiling: the session already comes up tiled, so a
+// toggle would turn it off and this would be the floating case under a name
+// that says otherwise. The verb says the state it wants.
 func TestDaemonVariantB_ToggleFirstThenWindows(t *testing.T) {
 	term, base := start(t, startOpts{cols: 120, rows: 40, args: []string{"new", "vb"}})
 	killDaemon(t, base)
 	waitBoot(t, term)
 
-	if out, err := tuiosCLI(t, base, "run-command", "--session", "vb", "ToggleTiling"); err != nil {
-		t.Fatalf("ToggleTiling failed: %v\n%s", err, out)
+	if out, err := tuiosCLI(t, base, "run-command", "--session", "vb", "EnableTiling"); err != nil {
+		t.Fatalf("EnableTiling failed: %v\n%s", err, out)
 	}
 	for i := 1; i <= 3; i++ {
 		if out, err := tuiosCLI(t, base, "run-command", "--session", "vb", "NewWindow"); err != nil {
@@ -112,9 +116,7 @@ func TestDaemonVariantD_Interactive(t *testing.T) {
 		t.Fatalf("never entered window management mode: %v\n%s", err, c.Snapshot())
 	}
 	time.Sleep(insertGuard)
-	if err := c.SendKeys("t"); err != nil {
-		t.Fatalf("toggle tiling: %v", err)
-	}
+	enableTiling(t, c)
 	rects := waitForSettledGeometry(t, base, 3)
 	assertTiled(t, rects, 120)
 }

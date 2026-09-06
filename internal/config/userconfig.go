@@ -105,8 +105,9 @@ type StartupConfig struct {
 	//
 	// It changes bare "tuios" and nothing else: every subcommand already says
 	// which it wants, and a session already running is a separate process this
-	// cannot reach. TUIOS_NO_DAEMON=1 and --standalone both override it, so a
-	// daemon that will not start never leaves the user without a way in.
+	// cannot reach. TUIOS_NO_DAEMON=1 and --standalone both override it, and a
+	// bare "tuios" whose daemon will not start runs standalone for that one run
+	// and says so, so this never leaves the user without a terminal.
 	Daemon bool `toml:"daemon"`
 }
 

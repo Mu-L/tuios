@@ -29,6 +29,13 @@ type captureHit struct {
 	X0, Y0, X1, Y1 int
 }
 
+// The two layers capture mode draws, and the order they draw in. The strip is
+// the higher of the two: see renderCaptureMode.
+const (
+	captureMarqueeZ = config.ZIndexContextMenu + 1
+	captureHintZ    = captureMarqueeZ + 1
+)
+
 // renderCaptureMode returns the layers capture mode adds. It records its own
 // hit rectangles as it goes.
 func (m *OS) renderCaptureMode() []*lipgloss.Layer {
@@ -42,11 +49,19 @@ func (m *OS) renderCaptureMode() []*lipgloss.Layer {
 	// The hint strip. It says what this mode can do, and it says different
 	// things for a pointer and for a keyboard, because on a mouse-less entry
 	// the drag is not reachable and offering it would be a lie.
+	//
+	// It sits one step above the marquee, which is the only other thing this
+	// mode draws. Both want row 0: the strip always, and the marquee's top edge
+	// whenever the highlighted pane starts there, which a tiled session's panes
+	// do. On equal z the marquee won, because it is appended second, and the
+	// whole instruction bar disappeared behind a pane border. Losing a few
+	// cells of an outline is the cheaper of the two, and the outline still has
+	// three edges and a highlighted interior saying which pane is picked.
 	strip := m.captureHintStrip(pal)
 	if strip != "" {
 		layers = append(layers, lipgloss.NewLayer(strip).
 			X(max(0, (m.GetRenderWidth()-lipgloss.Width(strip))/2)).Y(0).
-			Z(config.ZIndexContextMenu+1).ID("capture-hints"))
+			Z(captureHintZ).ID("capture-hints"))
 	}
 
 	// The window under the pointer or the keyboard cursor, lifted so "click
@@ -118,7 +133,7 @@ func (m *OS) captureOutline(pal overlay.Palette, x, y, w, h int, chip string) []
 	// here.
 	g := m.Settings.GetBorderForStyle()
 	ink := lipgloss.NewStyle().Foreground(pal.AccentBright).Bold(true)
-	z := config.ZIndexContextMenu + 1
+	z := captureMarqueeZ
 
 	layer := func(body string, lx, ly int, id string) *lipgloss.Layer {
 		return lipgloss.NewLayer(ink.Render(body)).X(lx).Y(ly).Z(z).ID(id)

@@ -670,3 +670,43 @@ func TestKittyPlaceRefactorIsByteIdentical(t *testing.T) {
 		t.Errorf("place emits\n %q\nwant\n %q", got, want)
 	}
 }
+
+// TestTheCaptureHintStripSurvivesAPaneOnRowZero is the bug startup.tiled
+// uncovered. Capture mode draws two things: the instruction strip along row 0,
+// and a marquee around the pane it is aiming at. A tiled pane starts on row 0,
+// so the marquee's top edge lands on the strip, and while the two shared a z
+// step the marquee won and the whole instruction bar vanished behind a pane
+// border. That is the first thing a new user sees, because the session ships
+// tiled.
+//
+// The strip has to be the one that survives: it is the only thing on screen
+// that says how to leave the mode.
+func TestTheCaptureHintStripSurvivesAPaneOnRowZero(t *testing.T) {
+	m := shotOS(t)
+	// A tiled pane: the whole content box, starting at the top row.
+	m.Windows = m.Windows[:1]
+	m.Windows[0].X, m.Windows[0].Y = 0, 0
+	m.Windows[0].Width, m.Windows[0].Height = 120, 38
+	m.BeginCapture(false)
+
+	var hintZ, marqueeTopZ int
+	var sawHint, sawMarquee bool
+	for _, l := range m.renderCaptureMode() {
+		switch l.GetID() {
+		case "capture-hints":
+			hintZ, sawHint = l.GetZ(), true
+		case "capture-marquee-top":
+			marqueeTopZ, sawMarquee = l.GetZ(), true
+		}
+	}
+	if !sawHint {
+		t.Fatal("capture mode drew no instruction strip")
+	}
+	if !sawMarquee {
+		t.Fatal("capture mode drew no marquee, so this proves nothing about the two overlapping")
+	}
+	if hintZ <= marqueeTopZ {
+		t.Errorf("the marquee's top edge is at z %d and the strip at z %d, so a pane on row 0 hides the strip",
+			marqueeTopZ, hintZ)
+	}
+}
