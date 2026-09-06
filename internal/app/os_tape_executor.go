@@ -644,9 +644,17 @@ func (m *OS) DisableTiling() error {
 	return nil
 }
 
-// SnapByDirection snaps a window to a direction.
+// SnapByDirection snaps the focused window to a direction with tiling off.
+// With tiling on the tiler owns every rectangle and there is nothing to snap,
+// so left and right move focus to the neighbour that way instead. That is one
+// answer for every door onto the action: the h and l keys, a recorded tape,
+// and run-command SnapLeft.
 func (m *OS) SnapByDirection(direction string) error {
 	if m.AutoTiling {
+		switch direction {
+		case "left", "right":
+			return m.focusTiledNeighbour(direction)
+		}
 		return fmt.Errorf("cannot snap windows while tiling mode is enabled")
 	}
 
@@ -996,6 +1004,21 @@ func (m *OS) SetBorderStyle(style string) error {
 func (m *OS) ShowNotificationCmd(message, notificationType string) error {
 	m.ShowNotification(message, notificationType, m.Settings.NotificationDuration)
 	return nil
+}
+
+// focusTiledNeighbour moves focus one pane left or right under tiling. The
+// scrolling layout steps along its strip, which also brings the column on
+// screen; every other layout asks the geometry.
+func (m *OS) focusTiledNeighbour(direction string) error {
+	if m.UseScrollingLayout {
+		if direction == "left" {
+			m.ScrollingFocusLeft()
+		} else {
+			m.ScrollingFocusRight()
+		}
+		return nil
+	}
+	return m.FocusDirection(direction)
 }
 
 // FocusDirection focuses a window in a direction (for BSP tiling).
