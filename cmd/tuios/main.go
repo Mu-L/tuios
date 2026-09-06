@@ -657,6 +657,10 @@ Debug log levels:
 			if daemonLogLevel != "" {
 				session.SetDebugLevel(session.ParseDebugLevel(daemonLogLevel))
 			}
+			// The daemon owns every emulator and scrollback ring, so it is
+			// the process a memory question is about. --pprof is a
+			// persistent flag and used to be accepted here and ignored.
+			startPprofServer()
 			return runDaemon(true, daemonNoRestore)
 		},
 	}
