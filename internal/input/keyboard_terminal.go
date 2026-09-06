@@ -11,17 +11,16 @@ import (
 
 // HandleTerminalModeKey handles keyboard input in terminal mode
 func HandleTerminalModeKey(msg tea.KeyPressMsg, o *app.OS) (*app.OS, tea.Cmd) {
-	// Guard: suppress misparsed mouse-sequence fragments during AllMotion→CellMotion transition.
-	// When switching from WindowManagementMode (AllMotion) to TerminalMode (CellMotion),
-	// buffered mouse motion sequences can be split across read boundaries. ultraviolet's
-	// 50ms ESC timeout force-processes partial CSI sequences, and the remaining bytes
-	// (digits, 'M', ';', etc.) are decoded as individual KeyPressEvents.
-	// Suppress unmodified single-character keys for 150ms after entering TerminalMode.
-	if msg.Mod == 0 && msg.Text != "" && !o.PrefixActive && !o.TerminalModeEnteredAt.IsZero() &&
-		time.Since(o.TerminalModeEnteredAt) < 150*time.Millisecond {
-		return o, nil
-	}
-
+	// There used to be a guard here that dropped every unmodified printable
+	// key for 150 ms after entering terminal mode, against mouse-sequence
+	// fragments that a host mouse-mode switch (all-motion in window mode,
+	// cell-motion in terminal mode) could split across reads. The client no
+	// longer switches the host's mouse mode: the view holds it in all-motion
+	// tracking for the whole session, so there is no transition to guard and
+	// the guard only ate the first keystrokes of anyone who typed the moment
+	// they entered the mode. TerminalModeEnteredAt is still recorded, for the
+	// tape recorder and for any host that turns out to need a transition
+	// guard again; nothing reads it on this path.
 	focusedWindow := o.GetFocusedWindow()
 
 	// Handle help menu first (takes priority over everything in terminal mode)
