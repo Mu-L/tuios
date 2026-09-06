@@ -537,11 +537,10 @@ func NewWindow(id, title string, x, y, width, height, z int, exitChan chan strin
 	terminalWidth := max(width-2, 1)
 	terminalHeight := max(height-2, 1)
 	// Create terminal with scrollback buffer support
-	terminal := vt.New(terminalWidth, terminalHeight)
 	// How deep the scrollback goes is the session's setting, handed in rather
 	// than read from a package global: one server process holds several
 	// sessions and they need not agree about it.
-	terminal.SetScrollbackMaxLines(scrollbackLines)
+	terminal := vt.NewWithScrollback(terminalWidth, terminalHeight, scrollbackLines)
 
 	// Set cell size for XTWINOPS terminal size reporting
 	// Using 10x20 pixels as reasonable defaults for a typical monospace font
@@ -749,8 +748,7 @@ func NewDaemonWindow(id, title string, x, y, width, height, z int, ptyID string,
 	// Create VT terminal with inner dimensions (accounting for borders)
 	terminalWidth := max(width-2, 1)
 	terminalHeight := max(height-2, 1)
-	terminal := vt.New(terminalWidth, terminalHeight)
-	terminal.SetScrollbackMaxLines(scrollbackLines)
+	terminal := vt.NewWithScrollback(terminalWidth, terminalHeight, scrollbackLines)
 	terminal.SetCellSize(10, 20)
 
 	window := &Window{

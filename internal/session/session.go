@@ -965,8 +965,7 @@ func (s *Session) createPTY(windowID string, width, height int, cwd string, comm
 
 	// Create VT emulator for persistent terminal state
 	// This maintains scrollback, screen content, cursor position across reconnects
-	terminal := vt.New(width, height)
-	terminal.SetScrollbackMaxLines(10000) // Match default scrollback
+	terminal := vt.NewWithScrollback(width, height, 10000) // Match default scrollback
 
 	// For a restored shell, seed the emulator with a one-line banner so the
 	// respawned process is clearly marked. This is written directly (before the
