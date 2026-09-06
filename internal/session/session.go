@@ -1652,12 +1652,31 @@ func restoredBanner(cwd string) string {
 
 // PTY methods
 
+// maxSubscriberQueue bounds, in bytes, the output one (client, pane) stream
+// holds for a client that has stopped taking it. The queue used to be bounded
+// by slot count alone, and with 16 KiB reads that was 64 MiB per stream, so a
+// daemon's heap grew by hundreds of megabytes while one stalled client sat
+// behind one flooding pane. Past this the stream is marked gapped and stops
+// queuing; it resumes from the ring once it has drained (resumeAfterGap). A
+// variable so a test can lower it.
+var maxSubscriberQueue int64 = 8 << 20
+
 // ptySubscriber is one client's output stream. sent is the stream position of
 // the last chunk this subscriber was handed, which is where the client is
 // resumed if it comes back.
 type ptySubscriber struct {
 	ch   chan ptyChunk
 	sent atomic.Int64
+	// queued is how many bytes sit on ch that the stream goroutine has not
+	// taken yet.
+	queued atomic.Int64
+	// gapped is set when a chunk could not be queued, because the queue held
+	// maxSubscriberQueue bytes or every slot was taken. Nothing more is queued
+	// for a gapped stream: what it holds drains, and then the stream is
+	// rebuilt from sent through the ring. A chunk dropped in the middle of a
+	// stream used to be a silent hole the client painted the rest of the
+	// stream on top of, until the next workspace switch replaced the screen.
+	gapped atomic.Bool
 }
 
 // ptyChunk is one item on a subscriber's stream: output bytes, or the size the
@@ -1712,15 +1731,46 @@ func (p *PTY) SubscribeFromSnapshot(clientID string, fromSeq int64) <-chan ptyCh
 func (p *PTY) subscribe(clientID string, fromSeq int64, fromSnapshot bool) <-chan ptyChunk {
 	p.subscribersMu.Lock()
 	defer p.subscribersMu.Unlock()
+	return p.subscribeLocked(clientID, fromSeq, fromSnapshot)
+}
 
+// subscriberFor returns the client's stream, or nil when it has none. The
+// stream goroutine reads it once per stream to account for what it takes.
+func (p *PTY) subscriberFor(clientID string) *ptySubscriber {
+	p.subscribersMu.RLock()
+	defer p.subscribersMu.RUnlock()
+	return p.subscribers[clientID]
+}
+
+// resumeAfterGap rebuilds a gapped stream once it has drained. The new stream
+// resumes at the position the old one reached, so the client is handed what
+// it missed from the ring, behind a clear when the ring has rolled past it. It
+// returns nil when the stream is not gapped or still holds chunks.
+func (p *PTY) resumeAfterGap(clientID string) (<-chan ptyChunk, *ptySubscriber) {
+	p.subscribersMu.Lock()
+	defer p.subscribersMu.Unlock()
+	sub, ok := p.subscribers[clientID]
+	if !ok || !sub.gapped.Load() || len(sub.ch) > 0 {
+		return nil, nil
+	}
+	close(sub.ch)
+	delete(p.subscribers, clientID)
+	debugLog("[DEBUG] PTY %s: client %s fell behind at %d, resuming from the ring", p.ID[:8], clientID, sub.sent.Load())
+	ch := p.subscribeLocked(clientID, sub.sent.Load(), false)
+	return ch, p.subscribers[clientID]
+}
+
+// subscribeLocked is subscribe with subscribersMu held.
+func (p *PTY) subscribeLocked(clientID string, fromSeq int64, fromSnapshot bool) <-chan ptyChunk {
 	// Return existing channel if already subscribed
 	if existing, ok := p.subscribers[clientID]; ok {
 		debugLog("[DEBUG] PTY %s: client %s already subscribed", p.ID[:8], clientID)
 		return existing.ch
 	}
 
-	// Each chunk is one PTY read of up to 16 KiB, so 4096 slots hold 64 MiB
-	// of output for a client that has stopped reading before it is dropped.
+	// Slots bound the count of chunks, maxSubscriberQueue bounds their bytes.
+	// Each chunk is one PTY read of up to 16 KiB, and the catch-up below is
+	// at most the ring, so the byte bound is the one a stalled client meets.
 	// The channel itself is 160 KiB per (client, pane); at 16384 it was 640.
 	sub := &ptySubscriber{ch: make(chan ptyChunk, 4096)}
 	p.subscribers[clientID] = sub
@@ -1741,6 +1791,7 @@ func (p *PTY) subscribe(clientID string, fromSeq int64, fromSnapshot bool) <-cha
 		send := func(c ptyChunk) {
 			select {
 			case sub.ch <- c:
+				sub.queued.Add(int64(len(c.data)))
 			default:
 				debugLog("[DEBUG] PTY %s: failed to send catch-up chunk (channel full)", p.ID[:8])
 			}
@@ -2722,17 +2773,38 @@ func (p *PTY) broadcast(chunk ptyChunk, seq int64) {
 		if !chunk.isResize() && sub.sent.Load() >= seq {
 			continue
 		}
+		// A gapped stream takes nothing more until it is rebuilt from the
+		// ring: queuing past the hole would paint the rest of the stream on
+		// top of it.
+		if sub.gapped.Load() {
+			continue
+		}
+		n := int64(len(chunk.data))
+		if sub.queued.Load()+n > maxSubscriberQueue {
+			sub.gapped.Store(true)
+			if p.debug {
+				debugLog("[DEBUG] PTY %s: %s holds %d bytes unread, gapped", p.ID[:8], clientID, sub.queued.Load())
+			}
+			continue
+		}
 		select {
 		case sub.ch <- chunk:
+			sub.queued.Add(n)
 			// Only a chunk that was taken counts as reached: a client dropped
-			// here resumes from the gap rather than past it.
-			sub.sent.Store(seq)
+			// here resumes from the gap rather than past it. A resize carries
+			// no position, so it leaves sent where the last bytes put it; it
+			// used to store its zero, and a client that switched away after a
+			// resize came back to the whole ring painted over its screen.
+			if !chunk.isResize() {
+				sub.sent.Store(seq)
+			}
 			if p.debug {
 				debugLog("[DEBUG] PTY %s: sent to %s", p.ID[:8], clientID)
 			}
 		default:
+			sub.gapped.Store(true)
 			if p.debug {
-				debugLog("[DEBUG] PTY %s: channel full for %s, dropped", p.ID[:8], clientID)
+				debugLog("[DEBUG] PTY %s: channel full for %s, gapped", p.ID[:8], clientID)
 			}
 		}
 	}

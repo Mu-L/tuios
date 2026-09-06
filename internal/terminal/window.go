@@ -769,10 +769,10 @@ func NewDaemonWindow(id, title string, x, y, width, height, z int, ptyID string,
 		IsBeingManipulated: false,
 		PTYID:              ptyID,
 		DaemonMode:         true,
-		// Each item is one batch off the daemon stream, up to 256 KiB, so
-		// 4096 slots is a gigabyte of backlog before a send is dropped.
-		// It was 16384, which is 900 KiB of channel per pane for a queue
-		// that never gets a hundred items deep.
+		// Each item is one batch off the daemon stream, up to 256 KiB.
+		// maxQueuedBytes bounds the bytes; the slots only bound the count,
+		// and 4096 of them is 160 KiB of channel per pane for a queue that
+		// never gets a hundred items deep.
 		outputChan:   make(chan outputChunk, 4096),
 		outputDone:   make(chan struct{}),
 		coalesceWake: make(chan struct{}, 1),

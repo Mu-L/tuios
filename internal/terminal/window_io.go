@@ -48,7 +48,20 @@ const (
 	// read, so shrinking it costs only extra lock round trips and buys a
 	// proportionally shorter worst-case stall for the renderer.
 	maxVTChunk = 8 * 1024
+
+	// queueRoomPoll is how often a sender blocked on a full queue looks again.
+	queueRoomPoll = time.Millisecond
 )
+
+// maxQueuedBytes bounds the daemon output queued for one pane's emulator and
+// not yet written to it. The queue is bounded by slots as well, and a slot
+// holds one daemon batch of up to 256 KiB, so slots alone let a pane whose
+// emulator was slower than the socket hold a gigabyte. Past this the sender
+// waits for outputWriter to take some of it back off. That is backpressure on
+// the socket the daemon writes rather than a drop: a client cannot recover a
+// dropped chunk, while the daemon holds the ring and can resume a stream it
+// had to stall. A variable so a test can lower it.
+var maxQueuedBytes int64 = 16 << 20
 
 // outputWriter is a goroutine that serializes writes to the terminal emulator.
 // It batches pending chunks into capped VT writes and coalesces render
@@ -518,6 +531,9 @@ func (w *Window) WriteOutputAsync(data []byte) {
 	copy(dataCopy, data)
 	chunk := outputChunk{data: dataCopy, epoch: w.outputEpoch.Load()}
 
+	if !w.waitForQueueRoom(int64(len(dataCopy))) {
+		return
+	}
 	// Queue to channel - non-blocking with buffered channel
 	select {
 	case <-w.outputDone:
@@ -527,6 +543,29 @@ func (w *Window) WriteOutputAsync(data []byte) {
 	default:
 		// Channel full - drop data (shouldn't happen with large buffer)
 	}
+}
+
+// waitForQueueRoom blocks the sender until n more bytes fit under
+// maxQueuedBytes. It reports false when the window closed while it waited,
+// in which case there is nothing to queue the bytes for.
+func (w *Window) waitForQueueRoom(n int64) bool {
+	if w.queuedBytes.Load()+n <= maxQueuedBytes {
+		return true
+	}
+	timer := time.NewTimer(queueRoomPoll)
+	defer timer.Stop()
+	for w.queuedBytes.Load()+n > maxQueuedBytes {
+		if w.closed.Load() {
+			return false
+		}
+		select {
+		case <-w.outputDone:
+			return false
+		case <-timer.C:
+			timer.Reset(queueRoomPoll)
+		}
+	}
+	return true
 }
 
 // DrainPendingOutput blocks until everything queued for the emulator ahead of

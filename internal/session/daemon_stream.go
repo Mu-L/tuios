@@ -24,6 +24,14 @@ func (d *Daemon) streamPTYOutput(cs *connState, pty *PTY, outputCh <-chan ptyChu
 
 	const maxBatch = 256 * 1024
 	batch := make([]byte, 0, maxBatch)
+	sub := pty.subscriberFor(cs.clientID)
+	// took accounts for a chunk taken off the stream, so broadcast can tell
+	// how much this client still holds.
+	took := func(c ptyChunk) {
+		if sub != nil {
+			sub.queued.Add(-int64(len(c.data)))
+		}
+	}
 
 	for {
 		select {
@@ -35,6 +43,7 @@ func (d *Daemon) streamPTYOutput(cs *connState, pty *PTY, outputCh <-chan ptyChu
 			if !ok {
 				return
 			}
+			took(chunk)
 			// A resize marks the byte the daemon's emulator changed width at,
 			// so it ends the batch in front of it and is sent on its own.
 			// Coalescing it into the bytes either side would put the client's
@@ -51,6 +60,7 @@ func (d *Daemon) streamPTYOutput(cs *connState, pty *PTY, outputCh <-chan ptyChu
 						if !ok {
 							goto send
 						}
+						took(more)
 						if more.isResize() {
 							resize = &more
 							goto send
@@ -84,6 +94,13 @@ func (d *Daemon) streamPTYOutput(cs *connState, pty *PTY, outputCh <-chan ptyChu
 				}); err != nil {
 					return
 				}
+			}
+			// A stream that was gapped while this client was slow has drained
+			// by the time the channel is empty. Rebuild it from where it got
+			// to, so the client is handed what it missed instead of the rest
+			// of the stream painted over a hole.
+			if ch, next := pty.resumeAfterGap(cs.clientID); ch != nil {
+				outputCh, sub = ch, next
 			}
 		}
 	}
