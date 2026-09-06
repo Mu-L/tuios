@@ -255,6 +255,10 @@ func (sb *Scrollback) encodeLine(buf []byte, cells uv.Line, width int) []byte {
 // appendContent appends the content token for s: the rune itself when s is
 // exactly one valid rune, otherwise an interned index or the empty marker.
 func (sb *Scrollback) appendContent(buf []byte, s string) []byte {
+	if len(s) == 1 && s[0] < utf8.RuneSelf {
+		// Nearly every cell of a text screen, and the whole of a plain log.
+		return append(buf, s[0])
+	}
 	if s == "" {
 		return append(buf, sbEmpty)
 	}

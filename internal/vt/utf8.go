@@ -406,6 +406,90 @@ func (e *Emulator) attachZeroWidth(content string) printOutcome {
 	return printConsumed
 }
 
+// printASCIIRun prints a run of printable ASCII bytes that arrived in the
+// ground state. It draws as many of them as fit before the right edge in one
+// pass, with one cell built for the run and one cursor move at the end,
+// and hands the rest back to the per-character path.
+//
+// The per-character path does a lot per byte that is the same for every byte
+// of a run: it reads the margins and the modes, builds a cell from the pen,
+// records the last cluster, moves the cursor and fires its callback, and arms
+// the open cluster. Only the last byte's bookkeeping survives to the next
+// byte, so the run pays for it once. The cell writes themselves still go
+// through Screen.SetCell one column at a time, which is what keeps a
+// double-width character the run lands on handled exactly as before.
+//
+// Anything that makes one byte differ from the next goes to handlePrint
+// instead: a pending wrap, insert mode, a designated character set, or a
+// cursor callback that expects to see every step.
+func (e *Emulator) printASCIIRun(run []byte) {
+	for len(run) > 0 {
+		if e.atPhantom || e.insertMode() || e.gsingle != 0 || e.charsets[e.gl] != nil || e.cb.CursorPosition != nil {
+			e.handlePrint(rune(run[0]))
+			run = run[1:]
+			continue
+		}
+
+		x, y := e.scr.CursorPosition()
+		left, right := 0, e.scr.Width()
+		// limit is where this pass stops. It is the right edge, except for
+		// a cursor to the left of the margins: the per-character path reads
+		// the margins afresh for every character, so a run that starts
+		// outside them and walks in has them apply from the first column
+		// inside. The pass stops at that column and the next one picks the
+		// margins up.
+		limit := right
+		if r := e.scr.ScrollRegion(); r.Min.X != 0 || r.Max.X != right {
+			switch {
+			case x >= r.Min.X && x < r.Max.X:
+				left, right = r.Min.X, r.Max.X
+				limit = right
+			case x < r.Min.X:
+				limit = r.Min.X
+			}
+		}
+		n := min(len(run), limit-x)
+		if n <= 0 {
+			e.handlePrint(rune(run[0]))
+			run = run[1:]
+			continue
+		}
+
+		cell := uv.Cell{
+			Width: 1,
+			Style: e.scr.cursorPen(),
+			Link:  e.scr.cursorLink(),
+		}
+		for k := range n {
+			cell.Content = asciiStr[run[k]]
+			e.scr.SetCell(x+k, y, &cell)
+		}
+
+		// The bookkeeping handleGraphemeWithin does for the last character
+		// of the run; every earlier character's is overwritten by the next.
+		last := run[n-1]
+		e.lastCluster, e.lastClusterWidth = asciiStr[last], 1
+		e.lastCellX, e.lastCellY = x+n-1, y
+		e.lastCellLeft, e.lastCellRight = left, right
+		nx := x + n
+		if nx >= right {
+			e.parkedX, e.parkedY = x+n-1, y
+			if e.autoWrapMode() {
+				e.atPhantom = true
+				nx = right - 1
+			} else {
+				e.atPhantom = false
+			}
+		} else {
+			e.parkedX = -1
+			e.atPhantom = false
+		}
+		e.scr.setCursor(nx, y, false)
+		e.openGrapheme.arm(x+n-1, y, 1, left, right, last, "")
+		run = run[n:]
+	}
+}
+
 // handleGrapheme handles UTF-8 graphemes.
 func (e *Emulator) handleGrapheme(content string, width int) printOutcome {
 	if width == 0 {
