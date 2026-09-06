@@ -484,12 +484,16 @@ tuios run-command -s work CloseWindow
 
 ### The escape hatch
 
-A keybinding with no verb of its own is still reachable by name:
+A keybinding with no verb of its own is still reachable by name. The tape name
+and the keymap name are the same command:
 
 ```sh
 tuios run-command -s work ToggleZoom
+tuios run-command -s work toggle_zoom
 tuios run-command --list
 ```
+
+A name that is not a command is an error. It does not report success.
 
 Prefer a verb where one exists. `run-command` reports that the command ran and
 nothing about what it changed.

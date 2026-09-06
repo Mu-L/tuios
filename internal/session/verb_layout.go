@@ -520,6 +520,14 @@ func (d *Daemon) verbRunCommand(_ *connState, params json.RawMessage) (any, *ver
 	if p.Command == "" {
 		return nil, invalidParam("command", `command is required, e.g. "SwitchWorkspace"`)
 	}
+	// The keymap's name for an action reaches the same command as the tape's
+	// name, and a name that is neither is an error here rather than a success
+	// the client reports for running nothing. See resolveCommandName.
+	canonical, ok := resolveCommandName(p.Command)
+	if !ok {
+		return nil, invalidParam("command", unknownCommandMessage(p.Command))
+	}
+	p.Command = canonical
 	sess, verr := d.resolveVerbSession(p.Session)
 	if verr != nil {
 		return nil, verr

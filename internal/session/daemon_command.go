@@ -2,7 +2,10 @@ package session
 
 import (
 	"fmt"
+	"strings"
 	"time"
+
+	"github.com/Gaurav-Gosain/tuios/internal/tape"
 )
 
 // daemonOwnedCommands are the commands the daemon executes itself whether or not
@@ -28,6 +31,44 @@ var daemonOwnedCommands = map[string]bool{
 	"NewWindow": true,
 }
 
+// clientQueryCommands are the read-only names the attached client answers
+// itself, beside the tape commands. They are commands a caller can name too.
+var clientQueryCommands = map[string]bool{
+	"ListWindows":    true,
+	"GetSessionInfo": true,
+	"GetWindow":      true,
+}
+
+// resolveCommandName turns the name a caller gave run-command into the one
+// the client and the daemon dispatch on, or reports that there is no such
+// command. The tape's name in any case and the keymap's name for the same
+// action both resolve; see tape.ResolveCommandName.
+//
+// A name nothing dispatches on used to be routed anyway, and the client's
+// executor ran it as nothing and reported success: run-command toggle_zoom
+// said "command executed" and changed nothing, on the path the docs call the
+// escape hatch for a binding that has no verb.
+func resolveCommandName(name string) (string, bool) {
+	if clientQueryCommands[name] {
+		return name, true
+	}
+	if ct, ok := tape.ResolveCommandName(name); ok {
+		return string(ct), true
+	}
+	for query := range clientQueryCommands {
+		if strings.EqualFold(strings.ReplaceAll(name, "_", ""), query) {
+			return query, true
+		}
+	}
+	return "", false
+}
+
+// unknownCommandMessage says what a caller can do about a name that is not a
+// command.
+func unknownCommandMessage(name string) string {
+	return fmt.Sprintf("unknown command %q. Run 'tuios run-command --list' for the command names", name)
+}
+
 // handleExecuteCommand routes a tape command to the TUI client attached to the session.
 func (d *Daemon) handleExecuteCommand(cs *connState, msg *Message) error {
 	var payload ExecuteCommandPayload
@@ -44,6 +85,14 @@ func (d *Daemon) handleExecuteCommand(cs *connState, msg *Message) error {
 		return d.sendCommandResult(cs, payload.RequestID, false, "session not found")
 	}
 	LogBasic("Execute command: found session %s (ID=%s)", session.Name, session.ID)
+
+	if payload.TapeScript == "" {
+		canonical, ok := resolveCommandName(payload.CommandType)
+		if !ok {
+			return d.sendCommandResult(cs, payload.RequestID, false, unknownCommandMessage(payload.CommandType))
+		}
+		payload.CommandType = canonical
+	}
 
 	// Find the TUI client attached to this session. When one is present most
 	// commands are routed to it (unchanged behavior). With no client attached,
