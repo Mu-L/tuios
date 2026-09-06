@@ -1107,7 +1107,22 @@ func (e *Emulator) Write(p []byte) (n int, err error) {
 		return 0, io.ErrClosedPipe
 	}
 
-	for i := range p {
+	for i := 0; i < len(p); i++ {
+		if b := p[i]; b >= ansi.SP && b < ansi.DEL && e.parser.State() == parser.GroundState && len(e.grapheme) == 0 {
+			// A run of printable ASCII in the ground state is what most of
+			// a flood is, and the parser would hand it over one byte at a
+			// time with nothing to decide: in this state every such byte
+			// is a print and the state does not change. Take the whole run
+			// here; see printASCIIRun.
+			j := i + 1
+			for j < len(p) && p[j] >= ansi.SP && p[j] < ansi.DEL {
+				j++
+			}
+			e.printASCIIRun(p[i:j])
+			e.lastState = parser.GroundState
+			i = j - 1
+			continue
+		}
 		e.parser.Advance(p[i])
 		state := e.parser.State()
 		// flush grapheme if we transitioned to a non-utf8 state or we have
