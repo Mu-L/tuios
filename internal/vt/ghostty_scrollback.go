@@ -129,18 +129,30 @@ func (t *GhosttyTerminal) readHistoryLineLocked(src *gh.Terminal, index int) uv.
 		if dc.wide == gh.CellWideWide {
 			out.Width = 2
 		}
-		if dc.cp != 0 {
-			out.Content = string(dc.cp)
-			if dc.tag == gh.CellContentCodepointGrapheme {
-				if cps, err := ref.Graphemes(); err == nil && len(cps) > 0 {
-					b := make([]rune, 0, len(cps))
-					for _, cp := range cps {
-						b = append(b, rune(cp))
-					}
-					out.Content = string(b)
-				}
+		// The tag decides what the content field holds. A cell the library
+		// filled with a background colour on a scroll keeps the palette
+		// index there, not a codepoint, and reading it as one put control
+		// characters into the history of every pane that scrolled under a
+		// coloured pen. The same switch as syncRowLocked.
+		switch dc.tag {
+		case gh.CellContentCodepoint:
+			if dc.cp != 0 {
+				out.Content = string(dc.cp)
+			} else {
+				out.Content = " "
+				out.Width = 1
 			}
-		} else {
+		case gh.CellContentCodepointGrapheme:
+			out.Content = string(dc.cp)
+			if cps, err := ref.Graphemes(); err == nil && len(cps) > 0 {
+				b := make([]rune, 0, len(cps))
+				for _, cp := range cps {
+					b = append(b, rune(cp))
+				}
+				out.Content = string(b)
+			}
+		default:
+			// Background-only cells carry no text.
 			out.Content = " "
 			out.Width = 1
 		}

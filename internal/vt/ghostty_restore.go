@@ -15,8 +15,11 @@ import (
 // family therefore buffers everything and the first operation that needs
 // terminal state flushes the buffer as one synthesized stream, in a fixed
 // order that does not depend on the order ApplyTerminalState called the
-// primitives. The synthesis starts from a hard reset, which is exactly the
-// situation the wire protocol restores into: a freshly built emulator.
+// primitives. The synthesis starts from a hard reset when the emulator holds
+// no history, which is the situation a fresh attach restores into. An
+// emulator that already holds history is one that survived a workspace
+// switch: ApplyTerminalState hands it only the rows it missed, and the
+// synthesis extends what it kept instead of resetting it.
 type ghosttyRestore struct {
 	scrollback []uv.Line
 	// grids[0] is the main screen, grids[1] the alternate.
@@ -87,8 +90,30 @@ func (t *GhosttyTerminal) flushRestoreLocked() {
 
 	var seq bytes.Buffer
 
-	// Hard reset gives the synthesis a known ground state.
-	seq.WriteString("\x1bc")
+	// A hard reset gives the synthesis a known ground state, and on the
+	// library it also drops the history. That is right for a fresh emulator
+	// and wrong for one that survived a workspace switch: it is handed only
+	// the rows that scrolled off while it was away, and the reset would
+	// throw away everything it kept, so the pane came back with the
+	// daemon's bounded window as its whole history. The surviving emulator
+	// gets the same ground state built by hand, minus the history: back on
+	// the main screen, no margins, absolute addressing, ASCII in every
+	// charset slot, a clean pen, and a cleared screen.
+	//
+	// ED 2 pushes nothing into history on the library, as on the pure
+	// emulator (TestGhosttyDiffEraseDisplayKeepsHistory pins it). The clear
+	// has to come before the lines are typed, not only after: the live rows
+	// are inside the tail the daemon sent, and typing over them would scroll
+	// them into history a second time.
+	extend := t.scrollbackLenLocked() > 0
+	if extend {
+		if t.activeAltLiveLocked() {
+			seq.WriteString("\x1b[?1049l\x1b[?1047l")
+		}
+		seq.WriteString("\x1b[?69l\x1b[r\x1b[?6l\x1b(B\x1b)B\x1b*B\x1b+B\x0f\x1b[0m\x1b]8;;\x1b\\\x1b[2J\x1b[H")
+	} else {
+		seq.WriteString("\x1bc")
+	}
 
 	// Scrollback replays as printed lines pushed off the top.
 	if len(r.scrollback) > 0 {
@@ -117,6 +142,12 @@ func (t *GhosttyTerminal) flushRestoreLocked() {
 		t.term.VTWrite(seq.Bytes())
 		seq.Reset()
 		t.captureScreenLocked(0)
+		// The history length is read from the library only while the main
+		// screen is up, so bank it now: the lines just typed are the last
+		// thing the main screen shows before the switch.
+		if n, err := t.term.ScrollbackRows(); err == nil {
+			t.mainSbLen = int(n)
+		}
 		seq.WriteString("\x1b[?1049h\x1b[2J\x1b[H")
 		appendGridPaint(&seq, r.grids[1], t.width, t.height)
 	}
@@ -220,10 +251,15 @@ func (t *GhosttyTerminal) flushRestoreLocked() {
 	}
 
 	// Shadow state follows the synthesized stream, which bypassed the
-	// scanner deliberately.
+	// scanner deliberately. The extending ground state above selected
+	// ASCII into the four slots and GL; it left the saved charsets and GR
+	// where the emulator had them, and the shadow keeps them too.
 	t.charsetIDs = defaultCharsetIDs
-	t.savedCharsets = defaultCharsetIDs
-	t.gl, t.gr = 0, 0
+	t.gl = 0
+	if !extend {
+		t.savedCharsets = defaultCharsetIDs
+		t.gr = 0
+	}
 	if r.hasCharsets {
 		for i, id := range r.charsets {
 			switch id {
@@ -244,9 +280,15 @@ func (t *GhosttyTerminal) flushRestoreLocked() {
 	if r.hasScrollRegion {
 		t.scrollRegion = r.scrollRegion.Intersect(uv.Rect(0, 0, t.width, t.height))
 	}
-	t.kittyKbd.Reset()
+	// A snapshot that carries no kitty keyboard stack leaves a surviving
+	// emulator's flags alone, on both backends: the library was sent nothing
+	// for them, and the pure emulator's RestoreKittyKeyboardState returns
+	// early on an empty stack.
 	if len(r.kittyKbdStack) > 0 {
+		t.kittyKbd.Reset()
 		t.kittyKbd.stack = append([]int(nil), r.kittyKbdStack...)
+	} else if !extend {
+		t.kittyKbd.Reset()
 	}
 
 	t.term.VTWrite(seq.Bytes())

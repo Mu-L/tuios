@@ -446,3 +446,65 @@ func TestGhosttyDiffKittyPassthroughContext(t *testing.T) {
 		}
 	}
 }
+
+// TestGhosttyDiffEraseDisplayKeepsHistory pins the ED 2 semantics the
+// incremental restore leans on: clearing the screen pushes nothing into
+// history on either backend, and ED 3 is what drops it. The synthesized
+// restore of a surviving emulator clears the screen twice around the lines
+// it types, and both clears must leave the history it is extending alone.
+func TestGhosttyDiffEraseDisplayKeepsHistory(t *testing.T) {
+	p := newDiffPair(t, 20, 5)
+	var b strings.Builder
+	for i := range 12 {
+		fmt.Fprintf(&b, "line %d\r\n", i)
+	}
+	p.write(t, []byte(b.String()))
+	before := p.pure.ScrollbackLen()
+	if before == 0 {
+		t.Fatal("the stream scrolled nothing into history")
+	}
+	p.write(t, []byte("\x1b[2J"))
+	p.compareScrollback(t, "ED 2", 0)
+	if got := p.gh.ScrollbackLen(); got != before {
+		t.Errorf("ED 2 changed the library's history from %d to %d", before, got)
+	}
+	p.write(t, []byte("\x1b[H\x1b[2J"))
+	p.compareScrollback(t, "CUP + ED 2", 0)
+	if got := p.gh.ScrollbackLen(); got != before {
+		t.Errorf("CUP + ED 2 changed the library's history from %d to %d", before, got)
+	}
+	p.write(t, []byte("\x1b[3J"))
+	p.compareScrollback(t, "ED 3", 0)
+	if got := p.gh.ScrollbackLen(); got != 0 {
+		t.Errorf("ED 3 left %d lines of history", got)
+	}
+}
+
+// TestGhosttyDiffScrollbackUnderColouredPen: rows that scroll off under a
+// pen with a background colour are filled by the library with cells that
+// hold the colour where a codepoint would be. The history reader must read
+// them as blanks, as the screen reader does, and not as control characters.
+func TestGhosttyDiffScrollbackUnderColouredPen(t *testing.T) {
+	p := newDiffPair(t, 40, 6)
+	var b strings.Builder
+	for i := range 12 {
+		fmt.Fprintf(&b, "OLD-%d\r\n", i)
+	}
+	b.WriteString("text\x1b[1;33;44m")
+	p.write(t, []byte(b.String()))
+	b.Reset()
+	b.WriteString("\r\n")
+	for i := range 8 {
+		fmt.Fprintf(&b, "NEW-%d\r\n", i)
+	}
+	b.WriteString("more\x1b[0;35m")
+	p.write(t, []byte(b.String()))
+	p.compareScrollback(t, "coloured pen", 0)
+	for i := range p.gh.ScrollbackLen() {
+		for x, c := range p.gh.ScrollbackLine(i) {
+			if c.Content != "" && c.Content < " " {
+				t.Fatalf("history line %d col %d reads as control character %q", i, x, c.Content)
+			}
+		}
+	}
+}
