@@ -621,7 +621,7 @@ func (m *OS) sectionLayoutItem() settingItem {
 // "unlimited" for a number: the config holds an int, and a stepper walking to
 // the cap one frame at a time is not how anyone sets this.
 func (m *OS) maxFPSItem() settingItem {
-	return enumItem("Max FPS", "Highest frame rate tuios draws at.", fpsOptions,
+	return enumItem("Max FPS", "Highest frame rate tuios draws at. A higher value applies at the next start.", fpsOptions,
 		func() string {
 			if m.Settings.NormalFPS >= config.MaxFPSCap {
 				return "unlimited"

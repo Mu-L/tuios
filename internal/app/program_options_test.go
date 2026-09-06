@@ -102,12 +102,18 @@ func TestProgramOptionsReachTheProgram(t *testing.T) {
 	if f := v.FieldByName("filter"); !f.IsValid() || f.IsNil() {
 		t.Error("no event filter on the program; every pointer move would compose a frame")
 	}
-	// bubbletea clamps to its own ceiling of 120 in NewProgram, so a cap above
-	// it reaches the program as 120. The assertion is that the cap was set at
-	// all: the default it replaces is 60.
-	wantFPS := min(int64(config.MaxFPSCap), 120)
-	if f := v.FieldByName("fps"); !f.IsValid() || f.Int() != wantFPS {
-		t.Errorf("program fps is %v, want %d", f, wantFPS)
+	// The rate is the user's max_fps, because it is also the rate the
+	// renderer's standing ticker wakes the process at, idle or not. bubbletea
+	// clamps to its own ceiling of 120 in NewProgram, so a setting above it
+	// reaches the program as 120. The fixture sets it away from bubbletea's
+	// own default of 60, so a list that dropped the option would fail here.
+	prevFPS := config.Global.NormalFPS
+	config.Global.NormalFPS = 30
+	t.Cleanup(func() { config.Global.NormalFPS = prevFPS })
+	p = tea.NewProgram(filterOS(t), ProgramOptions()...)
+	v = reflect.ValueOf(p).Elem()
+	if f := v.FieldByName("fps"); !f.IsValid() || f.Int() != 30 {
+		t.Errorf("program fps is %v, want the configured max_fps of 30", f)
 	}
 	if f := v.FieldByName("disableSignalHandler"); !f.IsValid() || !f.Bool() {
 		t.Error("the program installs its own signal handler; the entry point already owns the process signals")

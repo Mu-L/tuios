@@ -41,7 +41,15 @@ import (
 // TestEveryProgramTakesTheSharedOptions holds every construction site to this.
 func ProgramOptions() []tea.ProgramOption {
 	return []tea.ProgramOption{
-		tea.WithFPS(config.MaxFPSCap),
+		// The user's max_fps, read at program start, and not the ceiling it
+		// is clamped to. bubbletea runs a standing ticker at this rate for
+		// the life of the program whether or not a frame is pending, so the
+		// number is the idle wake-up rate of every client: at the ceiling
+		// (which bubbletea itself caps at 120) an idle tuios woke 590 times a
+		// second and spent 1.0% of a core doing nothing; at the default 60 it
+		// is 370 and 0.6%. Raising max_fps above the value it started with
+		// takes effect on the next start, which the settings row says.
+		tea.WithFPS(config.Global.NormalFPS),
 		tea.WithoutSignalHandler(),
 		tea.WithFilter(FilterMouseMotion),
 	}
