@@ -44,7 +44,10 @@ type GhosttyTerminal struct {
 	cursorSteady bool
 
 	// bufs shadow the two screens in uv cells; bufs[0] is main. active
-	// mirrors which one libghostty is drawing to.
+	// mirrors which one libghostty is drawing to. bufs[1] is nil until the
+	// guest first enters the alternate screen (see bufAt), so a pane that
+	// never runs a full-screen program does not carry a second grid of
+	// 112-byte cells.
 	bufs   [2]*uv.Buffer
 	active int
 	// gridStale is set by Write and cleared by syncLocked.
@@ -121,6 +124,15 @@ type GhosttyTerminal struct {
 	restore *ghosttyRestore
 }
 
+// bufAt returns the shadow buffer for screen idx, making the alternate one on
+// first use. Callers hold mu.
+func (t *GhosttyTerminal) bufAt(idx int) *uv.Buffer {
+	if t.bufs[idx] == nil {
+		t.bufs[idx] = uv.NewBuffer(t.width, t.height)
+	}
+	return t.bufs[idx]
+}
+
 var _ Terminal = (*GhosttyTerminal)(nil)
 
 // NewGhosttyTerminal creates a libghostty-backed terminal.
@@ -150,7 +162,7 @@ func NewGhosttyTerminal(w, h int) *GhosttyTerminal {
 		cursorSteady:    defaultCursorSteady,
 	}
 	t.bufs[0] = uv.NewBuffer(w, h)
-	t.bufs[1] = uv.NewBuffer(w, h)
+	// bufs[1] is made by bufAt on the first switch to the alternate screen.
 	t.scrollRegion = uv.Rect(0, 0, w, h)
 	t.dec = newGhosttyCellDecoder()
 
@@ -412,7 +424,9 @@ func (t *GhosttyTerminal) Resize(width, height int) {
 	t.width, t.height = width, height
 	_ = t.term.Resize(clampU16(width), clampU16(height), uint32(t.cellW), uint32(t.cellH))
 	t.bufs[0].Resize(width, height)
-	t.bufs[1].Resize(width, height)
+	if t.bufs[1] != nil {
+		t.bufs[1].Resize(width, height)
+	}
 	// DECSTBM margins reset on resize, as on the pure emulator's screens.
 	t.scrollRegion = uv.Rect(0, 0, width, height)
 	t.gridStale = true

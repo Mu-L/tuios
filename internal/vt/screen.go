@@ -28,6 +28,15 @@ func NewScreen(w, h int) *Screen {
 	return &s
 }
 
+// newAltScreen creates the alternate screen: a 1x1 grid with no scrollback
+// ring. Emulator.altScreen grows it to the main screen's size on first use.
+func newAltScreen() *Screen {
+	s := Screen{}
+	s.buf = uv.NewRenderBuffer(1, 1)
+	s.scroll = s.buf.Bounds()
+	return &s
+}
+
 // Reset resets the screen.
 // It clears the screen, sets the cursor to the top left corner, reset the
 // cursor styles, and resets the scroll region.

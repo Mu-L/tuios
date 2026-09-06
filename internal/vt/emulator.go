@@ -41,6 +41,12 @@ type Emulator struct {
 	// Both main and alt screens and a pointer to the currently active screen.
 	scrs [2]Screen
 	scr  *Screen
+	// altSized records that scrs[1] has been given the main screen's size.
+	// The alternate screen starts as a 1x1 grid and grows on the first switch
+	// to it, so a pane that never runs a full-screen program never pays for
+	// a second grid of cells: at 112 bytes a cell that is 1.3 MB per pane at
+	// 207x55, on each side of the socket. See altScreen.
+	altSized bool
 
 	// The shape DECSCUSR asked for. See CursorStyle for why it lives here
 	// rather than on a Screen.
@@ -173,7 +179,6 @@ type Emulator struct {
 func NewEmulator(w, h int) *Emulator {
 	t := new(Emulator)
 	t.scrs[0] = *NewScreen(w, h)
-	t.scrs[1] = *NewScreen(w, h)
 	// The alternate screen keeps no scrollback, which every accessor on this
 	// type already assumes: Scrollback, ScrollbackLen, ScrollbackLine,
 	// ClearScrollback and SetScrollbackMaxLines all read scrs[0]. Its ring was
@@ -181,7 +186,9 @@ func NewEmulator(w, h int) *Emulator {
 	// terminal width of cells per line and 112 bytes per cell, up to the
 	// default 10000 lines that SetScrollbackMaxLines never reached because that
 	// only resizes the main screen's. Nothing could read a line of it.
-	t.scrs[1].DisableScrollback()
+	//
+	// It also starts at 1x1: altScreen sizes it on first use.
+	t.scrs[1] = *newAltScreen()
 	t.scr = &t.scrs[0]
 	t.scrs[0].cb = &t.cb
 	t.scrs[1].cb = &t.cb
@@ -638,6 +645,18 @@ func (e *Emulator) ActiveScreenIsAlt() bool {
 	return e.scr == &e.scrs[1]
 }
 
+// altScreen returns the alternate screen, sized to match the main screen the
+// first time it is asked for. Every switch onto it goes through here, so the
+// grid exists whenever scr can point at it; a resize while the main screen is
+// active leaves a never-used alternate screen at 1x1.
+func (e *Emulator) altScreen() *Screen {
+	if !e.altSized {
+		e.scrs[1].Resize(e.scrs[0].buf.Width(), e.scrs[0].buf.Height())
+		e.altSized = true
+	}
+	return &e.scrs[1]
+}
+
 // RestoreAltScreenMode restores the alternate screen mode state.
 // This is used when reconnecting to a daemon session to restore the emulator state
 // without re-sending the escape sequences that would trigger the mode change.
@@ -648,7 +667,7 @@ func (e *Emulator) RestoreAltScreenMode(enabled bool) {
 		// Switch to alt screen buffer if not already there
 		// Don't clear it - we want to preserve any content that gets restored
 		if e.scr != &e.scrs[1] {
-			e.scr = &e.scrs[1]
+			e.scr = e.altScreen()
 		}
 	} else {
 		// Switch to main screen buffer if not already there
@@ -1033,7 +1052,9 @@ func (e *Emulator) Resize(width int, height int) {
 	}
 
 	e.scrs[0].Resize(width, height)
-	e.scrs[1].Resize(width, height)
+	if e.altSized {
+		e.scrs[1].Resize(width, height)
+	}
 	e.tabstops = uv.DefaultTabStops(width)
 
 	e.setCursor(x, y)

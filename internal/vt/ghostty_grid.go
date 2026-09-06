@@ -161,7 +161,7 @@ func (t *GhosttyTerminal) syncLocked() {
 		idx = 1
 	}
 	t.active = idx
-	buf := t.bufs[idx]
+	buf := t.bufAt(idx)
 
 	if err := t.rs.Update(t.term); err != nil {
 		return
