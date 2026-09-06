@@ -104,12 +104,12 @@ var optionSpecs = []Option{
 	{
 		Path: "appearance.window_button_style", Type: OptionString, Section: "appearance",
 		Description: "Window controls as a filled pill or as macOS traffic lights",
-		Accepted:    WindowButtonStyles, Default: WindowButtonStylePill,
+		Accepted:    WindowButtonStyles, Default: WindowButtonStyleDots,
 	},
 	{
 		Path: "appearance.window_button_position", Type: OptionString, Section: "appearance",
 		Description: "Which end of the title bar the window controls sit on",
-		Accepted:    WindowButtonPositions, Default: WindowButtonPositionRight,
+		Accepted:    WindowButtonPositions, Default: WindowButtonPositionLeft,
 	},
 	{
 		Path: "appearance.hide_scrollbar", Type: OptionBool, Section: "appearance",
@@ -472,7 +472,7 @@ var optionSpecs = []Option{
 	{
 		Path: "startup.tiled", Type: OptionBool, Section: "startup",
 		Description: "Start a new session tiled instead of floating",
-		Default:     "false",
+		Default:     "true",
 	},
 	{
 		Path: "startup.start_in_terminal_mode", Type: OptionBool, Section: "startup",
@@ -487,7 +487,7 @@ var optionSpecs = []Option{
 	{
 		Path: "startup.daemon", Type: OptionBool, Section: "startup",
 		Description: "Make a bare \"tuios\" attach to a daemon-backed session instead of running standalone. TUIOS_NO_DAEMON=1 or --standalone overrides it",
-		Default:     "false",
+		Default:     "true",
 	},
 
 	// [daemon]. agent_binaries is absent: it is a list, and a value that arrives

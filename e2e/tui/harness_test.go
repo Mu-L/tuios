@@ -197,6 +197,10 @@ type startOpts struct {
 	// --no-animations, because animations make frames non-deterministic; a
 	// test of what an animation leaves behind needs them.
 	animations bool
+	// daemonDefault runs tuios with the shipped startup.daemon, so a bare
+	// "tuios" attaches to a daemon. Every other test here holds the standalone
+	// TUI still with TUIOS_NO_DAEMON=1; see startIn.
+	daemonDefault bool
 }
 
 // start spawns tuios in a hermetic environment and returns the terminal plus
@@ -239,6 +243,16 @@ func startIn(t *testing.T, base string, o startOpts) *tuitest.Terminal {
 	}
 	// A predictable POSIX shell, and no user rc files changing the prompt.
 	env = append(env, "SHELL=/bin/sh", "ENV=", "PS1=$ ")
+	// startup.daemon ships on, so a bare "tuios" is a daemon client. Every test
+	// in this package that passes no subcommand was written against the
+	// standalone TUI and asserts on it, so keep them standalone rather than let
+	// a hundred assertions quietly change what they run. The variable is read
+	// in exactly one place, the bare-"tuios" decision, so it leaves `attach`,
+	// `new` and every other subcommand alone. daemonDefault opts back in, and
+	// the test of the shipped default is the one caller that sets it.
+	if !o.daemonDefault {
+		env = append(env, "TUIOS_NO_DAEMON=1")
+	}
 	// GORACE is forwarded so a tuios built with -race can be driven through this
 	// suite and have its findings survive. tuitest replaces the child's whole
 	// environment, so without this the child runs with GORACE unset and the race
@@ -286,10 +300,11 @@ func startIn(t *testing.T, base string, o startOpts) *tuitest.Terminal {
 //
 // It exists because every daemon-backed test in this package had to know two
 // things nothing here wrote down. The first is the argv: the session name is a
-// positional argument to `attach`, not a `-s` flag, and plain `tuios` with no
-// arguments is not a client at all but the standalone TUI, so a test that used
-// it was testing a tuios with no daemon behind it. The second is the mode, which
-// windowManagementMode explains.
+// positional argument to `attach`, not a `-s` flag, and plain `tuios` in this
+// package is not a client but the standalone TUI, because startIn holds it
+// there with TUIOS_NO_DAEMON=1; a test that used it was testing a tuios with no
+// daemon behind it. The second is the mode, which windowManagementMode
+// explains.
 func attachIn(t *testing.T, base, session string, o startOpts) *tuitest.Terminal {
 	t.Helper()
 	o.args = append(append([]string{}, o.args...), "attach", session)

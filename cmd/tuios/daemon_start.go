@@ -15,6 +15,15 @@ import (
 // reachable before giving up on it.
 const daemonStartTimeout = 5 * time.Second
 
+// errDaemonUnreachable marks the one failure a bare "tuios" can recover from:
+// no daemon is running and a new one will not start. Every other failure on the
+// daemon path is about a session, not about the daemon, and has to be reported.
+//
+// It is a sentinel rather than a type because the only question asked of it is
+// "was this the daemon refusing to come up", and errors.Is answers that through
+// the diagnostic wrapper that carries the message the user reads.
+var errDaemonUnreachable = errors.New("no daemon is running and one could not be started")
+
 // ensureDaemon starts a daemon if none is reachable, and says so once. Every
 // command that may bring a daemon up funnels through here so the wording, the
 // timeout and the failure explanation cannot drift between them.
@@ -24,12 +33,12 @@ func ensureDaemon() error {
 	}
 
 	fmt.Println("Starting TUIOS daemon...")
-	if err := startDaemonBackground(); err != nil {
+	if err := spawnDaemon(); err != nil {
 		return &diagnosticError{
 			What:  fmt.Sprintf("The TUIOS daemon could not be started: %v.", err),
 			Cause: "the tuios binary could not be re-executed, or the socket directory is not writable.",
 			Fix:   "run 'tuios daemon' in another terminal to see why it fails to start.",
-			Err:   err,
+			Err:   fmt.Errorf("%w: %w", errDaemonUnreachable, err),
 		}
 	}
 	return nil
@@ -60,6 +69,12 @@ func daemonStderr() *os.File {
 	}
 	return fh
 }
+
+// spawnDaemon is the call ensureDaemon makes to bring a daemon up. It is a
+// variable so a test can make the daemon refuse to start, which is the one
+// failure a bare "tuios" recovers from and therefore the one that has to be
+// proved rather than assumed.
+var spawnDaemon = startDaemonBackground
 
 // startDaemonBackground spawns a detached daemon and returns once a daemon is
 // reachable.

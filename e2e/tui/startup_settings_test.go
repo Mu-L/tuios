@@ -109,9 +109,10 @@ func TestStartupAllThreeSettings(t *testing.T) {
 	alive(t, term, "after verifying startup tiling")
 }
 
-// TestStartupDefaultsPreserved confirms the opt-in nature: with no [startup]
-// section, tuios still boots to the empty-session welcome screen exactly as
-// before, so the new settings default off.
+// TestStartupDefaultsPreserved pins open_default_window, which is the one
+// [startup] setting still off: with no config, tuios boots to the empty-session
+// welcome screen and opens no window of its own. Tiled and daemon ship on and
+// are covered by TestAFirstRunIsDaemonBackedAndTiledWithDotsOnTheLeft.
 func TestStartupDefaultsPreserved(t *testing.T) {
 	term, _ := start(t, startOpts{})
 
