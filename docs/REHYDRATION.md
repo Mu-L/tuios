@@ -83,11 +83,18 @@ suffix is still a suffix. The stronger rule is:
    workspace switch.
 
 `ApplyTerminalState` has said this in a comment for as long as its incremental
-branch has existed. It is written here because the ghostty backend breaks it and
-invariant 2 alone did not call that a bug: see issue #146. On the pure emulator,
-the default, it holds.
+branch has existed. It is written here because the ghostty backend broke it and
+invariant 2 alone did not call that a bug: the backend's synthesized restore
+started from a hard reset, which drops the library's history, so the tail the
+daemon sent became the whole history (issue #146). The synthesis now starts from
+a hard reset only when the emulator holds no history; an emulator that holds
+history is cleared and extended. `TestGhosttyWireAgain*`
+(`internal/session/ghostty_wire_test.go`) asserts this on every pairing of the
+two backends, in the shape a workspace switch takes: the destination is brought
+level with the source, the source moves on alone, and a second snapshot carries
+only the rows the destination lacks.
 
-Two tests assert this, and they are not redundant.
+Two more tests assert the rest, and they are not redundant.
 
 `TestRehydrationMatrix` (`internal/app/rehydration_matrix_test.go`) proves a
 *route*. It runs a real daemon in process and takes a pane through every route
