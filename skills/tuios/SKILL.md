@@ -199,6 +199,10 @@ Nothing warns you: the first form exits 0 and the pane shows a command that does
 not exist. If what you are sending would be typed by a human on a keyboard, use
 `send-text` and end it with a newline.
 
+A key you send does not move the person's view. If they have scrolled the pane
+back, your key reaches the shell and their view stays where they put it. Read
+the pane with `capture-pane`, which does not depend on what is on their screen.
+
 `--literal --raw` pushes characters through unparsed, which is `send-text` with
 extra steps.
 

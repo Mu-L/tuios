@@ -228,7 +228,10 @@ func HandleTerminalModeKey(msg tea.KeyPressMsg, o *app.OS) (*app.OS, tea.Cmd) {
 	// what a terminal with no modes does. Esc is the one key not forwarded; it
 	// is the reflex for "get me out of this", and a bare Esc into a shell in vi
 	// mode or a readline meta prefix is not a no-op.
-	if focusedWindow != nil && focusedWindow.InImplicitCopyMode() {
+	//
+	// A key from a remote sender is not the person reading, so it does none of
+	// this. See remoteKeyBypassesCopyMode.
+	if focusedWindow != nil && focusedWindow.InImplicitCopyMode() && !remoteKeyBypassesCopyMode(o) {
 		focusedWindow.ExitCopyMode()
 		if msg.String() == "esc" {
 			return o, nil
@@ -236,7 +239,7 @@ func HandleTerminalModeKey(msg tea.KeyPressMsg, o *app.OS) (*app.OS, tea.Cmd) {
 	}
 
 	// Handle copy mode (vim-style scrollback/selection)
-	if focusedWindow.InCopyMode() {
+	if focusedWindow.InCopyMode() && !remoteKeyBypassesCopyMode(o) {
 		return HandleCopyModeKey(msg, o, focusedWindow)
 	}
 
