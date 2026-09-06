@@ -114,7 +114,7 @@ graph TB
 
 - **VT Emulator**: ANSI/VT100 escape sequence parser with kitty keyboard protocol (CSI u, fish 4.x compatible), mode 2026/2027, OSC 4/52
 - **PTY Interface**: Pseudo-terminal communication with shell. Thread-safe HasMouseMode/HasAllMotionMode/KittyKeyboardFlags via atomics.
-- **Scrollback Buffer**: 10,000 line history
+- **Scrollback Buffer**: 10,000 lines by default (`appearance.scrollback_lines`), on the client and on the daemon
 
 **Rendering Pipeline:**
 
@@ -627,7 +627,7 @@ This ensures:
 
 - Style cache: reduces per-frame style allocations
 - Object pool reuse: Reduces GC pressure
-- Scrollback limit: 10,000 lines per window
+- Scrollback limit: `appearance.scrollback_lines` per pane, 10,000 by default, on both sides of the socket
 - Content caching: Prevents redundant terminal parsing
 
 **Concurrency:**
