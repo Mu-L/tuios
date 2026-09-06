@@ -391,29 +391,53 @@ func makeMoveAndFollowHandler(workspace int) ActionHandler {
 // Layout Action Handlers
 // ============================================================================
 
-func handleSnapLeft(_ tea.KeyPressMsg, o *app.OS) (*app.OS, tea.Cmd) {
-	if !o.AutoTiling && len(o.Windows) > 0 && o.FocusedWindow >= 0 {
-		o.Snap(o.FocusedWindow, app.SnapLeft)
+// snapOrFocus is what snap_left and snap_right do. With tiling off the focused
+// window snaps to that half of the screen. With tiling on there is nothing to
+// snap, and the key moves focus to the neighbour in that direction instead, so
+// h and l are not dead keys in the default layout; H and L swap in the same
+// directions and alt+h and alt+l preselect there. A step with no neighbour
+// that way does nothing, the way a column step at the end of the strip does.
+func snapOrFocus(o *app.OS, direction string) (*app.OS, tea.Cmd) {
+	if len(o.Windows) == 0 || o.FocusedWindow < 0 {
+		return o, nil
 	}
-	return o, nil
+	prev := o.FocusedWindow
+	_ = o.SnapByDirection(direction)
+	return maybeEnterTerminalOnFocusChange(o, prev, focusEnterTargeted)
+}
+
+func handleSnapLeft(_ tea.KeyPressMsg, o *app.OS) (*app.OS, tea.Cmd) {
+	return snapOrFocus(o, "left")
 }
 
 func handleSnapRight(_ tea.KeyPressMsg, o *app.OS) (*app.OS, tea.Cmd) {
-	if !o.AutoTiling && len(o.Windows) > 0 && o.FocusedWindow >= 0 {
-		o.Snap(o.FocusedWindow, app.SnapRight)
-	}
-	return o, nil
+	return snapOrFocus(o, "right")
+}
+
+// snapNeedsTilingOff says why a snap key did nothing. Fullscreen and unsnap
+// have no tiling meaning of their own: zoom is the tiled answer to the first
+// and the tiler owns every rectangle, which makes the second a no-op.
+func snapNeedsTilingOff(o *app.OS, what string) {
+	o.ShowNotification(what+" needs tiling off", "info", o.Settings.NotificationDuration)
 }
 
 func handleSnapFullscreen(_ tea.KeyPressMsg, o *app.OS) (*app.OS, tea.Cmd) {
-	if !o.AutoTiling && len(o.Windows) > 0 && o.FocusedWindow >= 0 {
+	if o.AutoTiling {
+		snapNeedsTilingOff(o, "Fullscreen")
+		return o, nil
+	}
+	if len(o.Windows) > 0 && o.FocusedWindow >= 0 {
 		o.Snap(o.FocusedWindow, app.SnapFullScreen)
 	}
 	return o, nil
 }
 
 func handleUnsnap(_ tea.KeyPressMsg, o *app.OS) (*app.OS, tea.Cmd) {
-	if !o.AutoTiling && len(o.Windows) > 0 && o.FocusedWindow >= 0 {
+	if o.AutoTiling {
+		snapNeedsTilingOff(o, "Unsnap")
+		return o, nil
+	}
+	if len(o.Windows) > 0 && o.FocusedWindow >= 0 {
 		o.Snap(o.FocusedWindow, app.Unsnap)
 	}
 	return o, nil

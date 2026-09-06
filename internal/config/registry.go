@@ -362,8 +362,8 @@ var ActionDescriptions = map[string]string{
 	"workspace_pill_switch":   "Switch to workspace",
 
 	// Layout
-	"snap_left":                 "Snap left",
-	"snap_right":                "Snap right",
+	"snap_left":                 "Snap or focus left",
+	"snap_right":                "Snap or focus right",
 	"snap_fullscreen":           "Fullscreen",
 	"unsnap":                    "Unsnap",
 	"snap_corner_1":             "Snap to top-left",
