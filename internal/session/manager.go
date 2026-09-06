@@ -15,6 +15,9 @@ type Manager struct {
 
 	// Configuration
 	socketPath string // Path to socket
+	// scrollbackLines is stamped into every session made here, so each pane
+	// keeps the history depth the daemon was configured with.
+	scrollbackLines int
 
 	// Lifecycle hooks (set by the daemon). onCreate fires after a session is
 	// registered; onDelete fires after it is removed but before it is stopped.
@@ -44,6 +47,14 @@ func NewManager() *Manager {
 // GetSocketPath and GetPidFilePath are defined in platform-specific files:
 // - manager_unix.go for Unix/Linux/macOS
 // - manager_windows.go for Windows
+
+// SetScrollbackLines sets the history depth every session made from now on
+// gives its panes. Zero means the emulator's default.
+func (m *Manager) SetScrollbackLines(n int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.scrollbackLines = n
+}
 
 // SetSocketPath sets the socket path (for testing).
 func (m *Manager) SetSocketPath(path string) {
@@ -84,6 +95,9 @@ func (m *Manager) CreateSession(name string, cfg *SessionConfig, width, height i
 	}
 	if cfg.SocketPath == "" {
 		cfg.SocketPath = m.SocketPath()
+	}
+	if cfg.ScrollbackLines == 0 {
+		cfg.ScrollbackLines = m.scrollbackLines
 	}
 
 	// Create the session

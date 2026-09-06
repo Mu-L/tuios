@@ -118,7 +118,7 @@ var optionSpecs = []Option{
 	},
 	{
 		Path: "appearance.scrollback_lines", Type: OptionInt, Section: "appearance",
-		Description: "Lines kept in each pane's scrollback buffer",
+		Description: "Lines each pane keeps in its scrollback. A pane takes the value when it is made. The daemon reads it when it starts",
 		Default:     "10000", Min: 100, Max: 1000000,
 	},
 	{
