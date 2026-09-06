@@ -56,6 +56,55 @@ func (m *OS) PointerOverPaneContent(x, y int) bool {
 	return inContent
 }
 
+// PointerOverLink reports whether a link sits under absolute screen (x, y),
+// without recording anything.
+//
+// It is what the motion filter asks. The filter used to pass every motion
+// over pane content on the strength of PointerOverPaneContent, because a link
+// can be anywhere a program printed, and a frame was then composed per cell
+// the pointer crossed over any pane at all: a sweep across an idle shell cost
+// one full compose per cell. Asking the pane whether there is a link under
+// the cell costs one cell read (marked links) or one row scan (bare URLs),
+// which is a hundredth of the frame it decides against.
+//
+// The tests are the ones LinkHoverAt applies, so a motion the filter passes
+// on this answer is a motion the handler will underline something for.
+func (m *OS) PointerOverLink(x, y int) bool {
+	if !linksEnabled(&m.Settings) {
+		return false
+	}
+	idx := m.WindowAt(x, y)
+	if idx < 0 {
+		return false
+	}
+	window := m.Windows[idx]
+	if m.guestOwnsPointer(window) {
+		return false
+	}
+	termX, termY, inContent := window.ScreenToTerminal(x, y)
+	if !inContent {
+		return false
+	}
+	_, ok := resolvePaneLink(window, termX, termY, &m.Settings)
+	return ok
+}
+
+// NotePointerSeen records where the host last put the pointer. The motion
+// filter calls it for every motion, including the ones it then drops, so the
+// answer is current wherever the pointer is and not only where a hover lives.
+func (m *OS) NotePointerSeen(x, y int) {
+	m.pointerSeenX, m.pointerSeenY = x, y
+}
+
+// PointerSeen is the position NotePointerSeen last recorded, falling back to
+// the last motion that reached Update for a client whose filter never ran.
+func (m *OS) PointerSeen() (x, y int) {
+	if m.pointerSeenX > 0 || m.pointerSeenY > 0 {
+		return m.pointerSeenX, m.pointerSeenY
+	}
+	return m.LastMouseX, m.LastMouseY
+}
+
 // TrackLinkPointer is what the motion handler calls. It refuses the whole
 // question wherever pane content is not what the pointer is really on, and
 // clears the run when it does, so a pointer that leaves a link for the rail,

@@ -165,3 +165,32 @@ func TestLatencyLocalRouting(t *testing.T) {
 	}
 	t.Log(d.Line("local/next pane routing only, 4 panes"))
 }
+
+// TestLatencyTypedKey measures the key a person types most: a plain letter into
+// a focused shell, from HandleKeyPress to the byte reaching the pane's writer.
+// No frame is composed, because the frame after a forwarded key is the same
+// frame as before it (see docs/perf.md); this is the routing alone.
+//
+// TestLatencyLocalRouting measures a window-mode key, which reads the flattened
+// keymap. A typed key reads the terminal-mode, global and main sections in
+// turn, and those used to be rebuilt from the config on every lookup.
+func TestLatencyTypedKey(t *testing.T) {
+	latencyGate(t)
+	app.SetInputHandler(HandleInput)
+
+	o := latencyOS(t, 4)
+	o.Mode = app.TerminalMode
+	// The pane's writer is a sink: the wire and the guest are measured in
+	// internal/app, and this hop stops where the bytes leave the input layer.
+	o.Windows[0].DaemonWriteFunc = func([]byte) error { return nil }
+	_ = frame(t, o)
+
+	msg := tea.KeyPressMsg{Code: 'a', Text: "a"}
+	var d perf.Dist
+	for range latencyRuns {
+		t0 := time.Now()
+		o, _ = HandleKeyPress(msg, o)
+		d.AddSince(t0)
+	}
+	t.Log(d.Line("typed letter -> pane writer, 4 panes"))
+}

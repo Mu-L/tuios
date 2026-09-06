@@ -218,8 +218,8 @@ func (m *OS) SetSpotlight(on bool) {
 // latches it, and nothing reads the other source after that.
 func (m *OS) spotlightAnchor() (int, int) {
 	if m.spotlightConfig().FollowMode() == config.SpotlightFollowMouse {
-		if m.LastMouseX > 0 || m.LastMouseY > 0 {
-			m.spotlight.x, m.spotlight.y = m.LastMouseX, m.LastMouseY
+		if px, py := m.PointerSeen(); px > 0 || py > 0 {
+			m.spotlight.x, m.spotlight.y = px, py
 			m.spotlight.anchored = true
 		}
 	} else if c := m.getRealCursor(); c != nil {

@@ -26,6 +26,15 @@ func (m *OS) dockSessionTooltipTrack(a DockSessionAction) {
 	m.tooltipTrack(tooltipDockSession, int(a))
 }
 
+// DockHoverActive reports whether the dock is showing something the pointer
+// put there: a brightened session control, or a label pending or up on a
+// control or a pill. The motion filter passes one more event while it is, so
+// the pointer leaving the band is the event that clears it.
+func (m *OS) DockHoverActive() bool {
+	return m.dockSessionHover != DockSessionNone ||
+		m.Tooltip.Source == tooltipDockSession || m.Tooltip.Source == tooltipDockWorkspace
+}
+
 // renderDockSessionTooltip composes the hovered control's label.
 //
 // It sits one row off the bar, on the hairline the dock already owns. The bar is

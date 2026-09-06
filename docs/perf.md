@@ -418,3 +418,153 @@ No standing `tea.Tick` was introduced, and one standing per-pane `time.Ticker`
 was removed. No blocking daemon round trip was moved onto the Update goroutine.
 `TestIdleCostStaysLow`: 0 idle wire bytes over 10 s, `ticks=104 work=0
 render=0`. Full `e2e/tui` suite passes.
+
+## 2026-09 input and event loop
+
+Profiled the input path with pprof (CPU and allocation) over the key a person
+types most, a plain letter into a focused shell, and measured the idle process
+with `/proc` context-switch counters and a CPU profile of the real binary. The
+2026-08 pass measured a window-mode key and concluded routing costs nothing;
+that key reads the flattened keymap, and the typed letter takes a different
+road.
+
+Four agents shared the machine for most of this pass. **Every A/B below was
+taken under the bench lock, interleaved A, A-again, B for six rounds (three
+for the latency and idle rows), with the A-again column as the noise floor.**
+Load was 2 to 8 during the runs and the timing noise floor is wide (benchstat
+reports ±30% to ±120% on A versus A-again, p>0.18 on every row); allocation
+counts, frame counts and context-switch counts are exact. No time below is
+quoted as a win unless it is an order of magnitude past that floor.
+
+### Where the time went
+
+`BenchmarkKeyTerminalTyped` (new), one letter through `HandleInput` to the
+pane's writer, before anything changed:
+
+| key | ns/op | allocs/op |
+|---|---|---|
+| letter typed into a shell | 18,900 | 177 |
+| ctrl chord into a shell | 28,300 | 186 |
+| leader then prefix key | 36,000 | 325 |
+| Tab in window mode (what 2026-08 measured) | 650 | 7 |
+
+95% of the allocations were `KeyNormalizer.ExpandKeys` under
+`KeybindRegistry.sectionKeyMap`. Every lookup in a prefix, global, script,
+terminal-mode or rail section rebuilt the section from the config: sort the
+action names, normalize every key, allocate a map, read one key, drop the map.
+A typed letter passes the terminal-mode section twice, the global section and
+the main map on its way to the PTY, and each gate tries two spellings, so one
+keystroke was eight rebuilds.
+
+### What changed
+
+**The registry resolves each section once** (`buildMappings`, rebuilt by
+`Reload`, which every in-place editor already calls).
+
+| | before | after | noise (A vs A) |
+|---|---|---|---|
+| typed letter, allocs/op | 177 | **14** | exact |
+| typed letter, sec/op | 56.8 µs | **3.7 µs** (-93%, p=0.002) | ±105% |
+| prefix chord, allocs/op | 325 | **10** | exact |
+| prefix chord, sec/op | 100.6 µs | **2.8 µs** (-97%, p=0.002) | ±79% |
+| Tab in window mode (control) | 1.5 µs / 7 allocs | 2.2 µs / 7 allocs | within noise (p=0.31) |
+
+`TestLatencyTypedKey` (new), the letter as a distribution, n=500, three runs
+each:
+
+| | p50 | p99 |
+|---|---|---|
+| before | 25.3 / 29.7 / 27.9 µs | 72 µs / 1.74 ms / 102 µs |
+| before, again (noise) | 28.9 / 32.9 / 25.9 µs | 1.71 ms / 652 µs / 1.01 ms |
+| after | **1.5 / 1.5 / 1.5 µs** | **3.0 / 2.6 / 3.2 µs** |
+| window-mode key, control, before | 1.3 / 1.6 / 1.3 µs | 3.0 / 2.6 / 3.8 µs |
+| window-mode key, control, after | 1.5 / 1.9 / 1.4 µs | 6.7 / 4.1 / 6.7 µs |
+
+The control's p50 spread across all nine runs (1.3 to 1.9 µs) is the noise
+floor; the typed key's p50 fell twenty times past it, and its p99 tail (which
+reached 1.7 ms on two of the six baseline runs) is gone.
+
+**The motion filter asks the pane for a link instead of passing every cell.**
+The link clause passed every motion over any pane's content box, and bubbletea
+composes a frame after each: a pointer sweep across an idle shell cost one full
+compose per cell crossed. `BenchmarkPointerSweep/content/filtered` (120x40,
+four blank panes) and `BenchmarkMouseSweepContent` (new; 207x55, a pane full of
+plain text, links = all):
+
+| | frames/event before | after | sec/op before | after |
+|---|---|---|---|---|
+| sweep, 120x40 | 0.966 | **0** | 3.63 ms | **406 ns** |
+| sweep, 207x55 plain text | 1 per cell | **0** | 5.50 ms | **10.8 µs** (the bare-URL row scan) |
+
+The filter now answers the question the handler was going to ask anyway
+(`PointerOverLink`: one cell read for an OSC 8 link, one row scan for a bare
+URL) and passes the motion only when there is a link. Three things had ridden
+the old clause with no clause of their own, and were dead with `links = off`
+or over the chrome: a ctrl-click grab waiting to become a drag, zen mode's
+mouse variant, and the dock's session-control hover and workspace-pill
+tooltips, which no clause passed on any client. Each has a clause and a test
+now. A floating pane spawns at the pointer's last reported position, which the
+filter records for every motion, so the spawn no longer depends on which
+hover last let an event through.
+
+`BenchmarkMouseMotionHover` moved the other way (0.49 µs to 5.2 µs, 1 to 4
+allocs): it measures the filter plus `Update` with no frame, over content with
+no link, so it now pays the row scan and saves a compose it never counted.
+
+**The render ticker runs at the configured max_fps.** bubbletea flushes frames
+from a standing ticker for the life of the program, pending frame or not, and
+tuios set its rate to the ceiling `max_fps` is clamped to, which bubbletea caps
+at 120. Real binary, one idle shell at 207x55, 10 s, `/proc` counters:
+
+| | voluntary ctx switches / s | CPU |
+|---|---|---|
+| before (ticker at 120) | 583 / 565 / 586 | 1.0 / 1.0 / 1.1% |
+| before, again (noise) | 607 / 615 / 584 | 1.1 / 0.9 / 1.1% |
+| after (ticker at the default 60) | **364 / 376 / 358** | **0.6 / 0.7 / 0.7%** |
+
+Attributed by building the binary at 120, 60 and 10: 590, 369 and 118 switches
+a second, 1.0%, 0.6% and 0.2%. The residual at 10 is tuios's own 10 Hz idle
+tick plus the runtime. **This is the one change in the pass that alters a
+documented behaviour**: raising `max_fps` above the value the client started
+with now takes effect at the next start (the settings row says so). It is its
+own commit so it can be reverted alone. The real fix is upstream, a bubbletea
+ticker that idles when nothing is pending.
+
+**Keys typed right after entering terminal mode reach the pane.**
+`HandleTerminalModeKey` dropped every unmodified printable key for 150 ms
+after entering terminal mode, a guard against mouse-sequence fragments from a
+host mouse-mode switch the client no longer makes (the view holds all-motion
+tracking for the whole session). On the real binary a line typed 0 ms or 50 ms
+after pressing `i` never reached the shell; after 500 ms it did. The guard is
+gone and all three reach it. Not a performance change; recorded here because a
+silently dropped keystroke is the input bug that matters most.
+
+### Measured and deliberately not changed
+
+`bindingKeys` is computed once per gate rather than once per key: four times
+for a typed letter, 8 of the 14 remaining allocations, about 0.4 µs. Threading
+one spelling list through the gates is an API change for 0.02% of the frame
+that follows the key.
+
+`SendInput`'s `debugLogf` evaluates `time.Now().Format`, `string(input)` and
+the hex form of the input before the flag can be checked, three of the 14
+allocations. `internal/terminal`, handed to that pass.
+
+`ApplyReloadedConfig` never calls `KeybindRegistry.Reload`, so keybindings do
+not follow a config-file reload on any road. Pre-existing, unchanged by the
+section cache (the flattened map was already frozen the same way), and outside
+a performance pass. Reported rather than fixed.
+
+### Invariants held
+
+```
+BenchmarkIdleTick-8   0 render/tick   0 work/tick   296 B/op   5 allocs/op   (n=6, A and B)
+```
+
+No standing `tea.Tick` was introduced. The bubbletea render ticker was slowed,
+not added. Negative controls: seven, all valid, each a mutation of shipped code
+that fails a named assertion (`TestMotionFilterPassesPaneContentForLinks`,
+`TestMotionFilterPassesACtrlDragGrab`, `TestMotionFilterFeedsZenMouseMode`,
+`TestMotionFilterRecordsThePointerItDrops`, `TestMotionFilterPassesTheDockBand`,
+`TestProgramOptionsReachTheProgram`,
+`TestKeysTypedRightAfterEnteringTerminalModeReachThePTY`).

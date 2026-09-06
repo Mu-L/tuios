@@ -102,43 +102,163 @@ func TestMotionFilterPassesTheBandExitEvent(t *testing.T) {
 // TestMotionFilterPassesPaneContentForLinks is the other half of the clause the
 // two tests above now qualify. A link under the pointer is drawn by the pane
 // itself, so unlike every other hover in tuios its target is not a rectangle the
-// chrome recorded, and the motion that crosses it has to be let through on the
-// strength of the pane's content box alone.
+// chrome recorded. The clause used to pass every motion over a pane's content
+// box on that strength, which composed one frame per cell for a sweep across
+// any pane at all; it now asks the pane whether a link is under the cell.
 //
-// Negative control, both confirmed red: with the links clause removed from
-// filterMouseMotion the first assertion fails, and so does the underline in a
-// real session. With the cell-change guard removed the last assertion fails.
-//
-// The clause's absence was observed at the level above, though: before it went
-// in, TestMotionFilterPassesRailHover passed and no motion over a pane reached
-// Update, which is the state this test's first assertion is written against.
+// Negative control, confirmed red: with PointerOverLink replaced by
+// PointerOverPaneContent the "plain text" assertion fails, and with the clause
+// removed the first assertion fails and so does the underline in a real
+// session. With the cell-change guard removed the last assertion fails.
 func TestMotionFilterPassesPaneContentForLinks(t *testing.T) {
 	o := filterOS(t)
 	o.Mode = WindowManagementMode
-
 	o.Settings.Links = config.LinksAll
-	if FilterMouseMotion(o, tea.MouseMotionMsg{X: 50, Y: 10}) == nil {
-		t.Error("motion over pane content was dropped; no link can ever underline itself")
+
+	// A real emulator in the pane, with a bare URL on one row and plain text
+	// on another. The pane is at X=31, Y=1 with a border, so its content
+	// starts at (32, 2).
+	win := newTestWindow(t, "aaaaaaaa1111", 40, 20)
+	win.X, win.Y, win.Workspace = 31, 1, 1
+	win.WriteOutput([]byte("\x1b[3;1Hplain text with no address on it\x1b[10;1Hsee https://example.com/e2e now"))
+	o.Windows = []*terminal.Window{win}
+	linkX, linkY := screenOf(win, 8, 9)
+	textX, textY := screenOf(win, 8, 2)
+
+	if FilterMouseMotion(o, tea.MouseMotionMsg{X: linkX, Y: linkY}) == nil {
+		t.Error("motion over a link was dropped; no link can ever underline itself")
+	}
+	if FilterMouseMotion(o, tea.MouseMotionMsg{X: textX, Y: textY}) != nil {
+		t.Error("motion over plain text passed; a sweep across a pane composes a frame per cell")
 	}
 
 	// Off is off: the guard the two tests above pin is restored exactly.
 	o.Settings.Links = config.LinksOff
-	if FilterMouseMotion(o, tea.MouseMotionMsg{X: 50, Y: 10}) != nil {
+	if FilterMouseMotion(o, tea.MouseMotionMsg{X: linkX, Y: linkY}) != nil {
 		t.Error("appearance.links = off still passed pane motion")
 	}
 
 	// A pane's border is not its content, so the pointer resting on the frame
-	// buys nothing. The pane above starts at X=31 with a border, so column 31 is
-	// the border and column 32 the first content cell.
+	// buys nothing. Column 31 is the border and column 32 the first content cell.
 	o.Settings.Links = config.LinksAll
-	if FilterMouseMotion(o, tea.MouseMotionMsg{X: 31, Y: 10}) != nil {
+	if FilterMouseMotion(o, tea.MouseMotionMsg{X: 31, Y: linkY}) != nil {
 		t.Error("motion on a pane's border was passed as content")
 	}
 
+	// A hover that is showing keeps one more event flowing, so the pointer
+	// leaving the run for plain text is the event that clears the underline.
+	if !o.LinkHoverAt(linkX, linkY) {
+		t.Fatal("the fixture's URL did not resolve as a link")
+	}
+	if FilterMouseMotion(o, tea.MouseMotionMsg{X: textX, Y: textY}) == nil {
+		t.Error("the motion that leaves a link was dropped; the underline would stay")
+	}
+	o.clearLinkHover()
+
 	// And a motion that lands on the cell the pointer is already on resolves to
 	// the run it is already showing, so it is dropped.
-	o.LastMouseX, o.LastMouseY = 50, 10
-	if FilterMouseMotion(o, tea.MouseMotionMsg{X: 50, Y: 10}) != nil {
+	o.LastMouseX, o.LastMouseY = linkX, linkY
+	if FilterMouseMotion(o, tea.MouseMotionMsg{X: linkX, Y: linkY}) != nil {
 		t.Error("a motion that changed no cell was passed")
+	}
+}
+
+// TestMotionFilterPassesACtrlDragGrab. A ctrl-click on pane content arms a grab
+// that becomes a drag once the pointer moves far enough, and only motion can
+// commit it. Nothing is dragging yet, so the drag clause does not cover it, and
+// it used to reach Update only because every motion over content did.
+//
+// Negative control: remove the CtrlDragPending clause and this fails.
+func TestMotionFilterPassesACtrlDragGrab(t *testing.T) {
+	o := filterOS(t)
+	o.Settings.Links = config.LinksOff
+	over := tea.MouseMotionMsg{X: 50, Y: 10, Mod: tea.ModCtrl}
+	if FilterMouseMotion(o, over) != nil {
+		t.Fatal("motion over plain content passed with no grab armed")
+	}
+	o.CtrlDragPending = true
+	if FilterMouseMotion(o, over) == nil {
+		t.Error("motion was dropped with a ctrl-drag grab armed; the drag can never commit")
+	}
+}
+
+// TestMotionFilterFeedsZenMouseMode. The mouse variant of zen mode reveals the
+// borders while the pointer moves and reads the clock of the last motion that
+// reached Update, so it has to see motion, over chrome as much as over a pane.
+//
+// Negative control: remove the zen clause and this fails.
+func TestMotionFilterFeedsZenMouseMode(t *testing.T) {
+	o := filterOS(t)
+	o.Settings.Links = config.LinksOff
+	// A pane's border: chrome no other clause claims.
+	overChrome := tea.MouseMotionMsg{X: 31, Y: 10}
+	if FilterMouseMotion(o, overChrome) != nil {
+		t.Fatal("motion over chrome passed with zen off; the CPU guard is gone")
+	}
+	o.Settings.ZenMode = config.ZenModeMouse
+	if FilterMouseMotion(o, overChrome) == nil {
+		t.Error("motion was dropped under zen = mouse; the borders can never reveal")
+	}
+	o.LastMouseX, o.LastMouseY = overChrome.X, overChrome.Y
+	if FilterMouseMotion(o, overChrome) != nil {
+		t.Error("a motion inside the same cell passed under zen = mouse")
+	}
+}
+
+// TestMotionFilterRecordsThePointerItDrops. A floating pane spawns at the
+// pointer, and the pointer is wherever the host last said it was, not where the
+// last motion that reached Update happened to be. The filter sees every motion,
+// so it is the one place that can keep that current.
+//
+// Negative control: remove the NotePointerSeen call and this fails.
+func TestMotionFilterRecordsThePointerItDrops(t *testing.T) {
+	o := filterOS(t)
+	o.Settings.Links = config.LinksOff
+	o.AutoTiling = false
+	if FilterMouseMotion(o, tea.MouseMotionMsg{X: 70, Y: 12}) != nil {
+		t.Fatal("the motion was not dropped, so this proves nothing")
+	}
+	if x, y := o.PointerSeen(); x != 70 || y != 12 {
+		t.Fatalf("PointerSeen = (%d,%d) after a dropped motion at (70,12)", x, y)
+	}
+	x, y, _, _ := o.NewWindowPlacement()
+	if x != 70 || y != 12 {
+		t.Errorf("a floating pane would spawn at (%d,%d), not at the pointer (70,12)", x, y)
+	}
+}
+
+// TestMotionFilterPassesTheDockBand. The dock's session controls brighten under
+// the pointer and a clipped workspace pill says its name, both off motion over
+// the band, and no clause let that motion through: the hover and the labels
+// were dead on every client. One event per cell over the band, and one more
+// after the pointer leaves it, so the reveal clears.
+//
+// Negative control: remove the dock clause and this fails.
+func TestMotionFilterPassesTheDockBand(t *testing.T) {
+	o := filterOS(t)
+	o.Settings.Links = config.LinksOff
+	overDock := tea.MouseMotionMsg{X: 60, Y: 39}
+	if !o.InDockBand(overDock.Y) {
+		t.Fatalf("row %d is not the dock band; the fixture moved", overDock.Y)
+	}
+	if FilterMouseMotion(o, overDock) == nil {
+		t.Error("motion over the dock band was dropped; its controls can never brighten")
+	}
+	o.LastMouseX, o.LastMouseY = overDock.X, overDock.Y
+	if FilterMouseMotion(o, overDock) != nil {
+		t.Error("a motion inside the same dock cell passed")
+	}
+
+	// The pointer leaves the band with a control still lit: that one event
+	// must pass so the handler can clear it, and the next must not.
+	o.dockSessionHover = DockSessionLeave
+	offDock := tea.MouseMotionMsg{X: 60, Y: 30}
+	if FilterMouseMotion(o, offDock) == nil {
+		t.Error("the motion that leaves a lit control was dropped; it stays lit")
+	}
+	o.dockSessionHover = DockSessionNone
+	o.LastMouseX, o.LastMouseY = overDock.X, overDock.Y
+	if FilterMouseMotion(o, offDock) != nil {
+		t.Error("motion off the dock with nothing lit passed; the CPU guard is gone")
 	}
 }
