@@ -166,6 +166,15 @@ func (sb *Scrollback) PushLine(line uv.Line) {
 	sb.push(line[:n], len(line))
 }
 
+// PushBlankLine stores a blank line of the given width as the newest
+// scrollback line: what a row of the screen that nothing has written holds.
+func (sb *Scrollback) PushBlankLine(width int) {
+	if width <= 0 {
+		return
+	}
+	sb.push(nil, width)
+}
+
 // push stores cells, the non-blank prefix of a line of the given width, as
 // the newest line.
 func (sb *Scrollback) push(cells uv.Line, width int) {
@@ -700,7 +709,7 @@ func (sb *Scrollback) SetMaxLines(maxLines int) {
 }
 
 // extractLine copies row y of buf into a fresh line of the given width.
-func extractLine(buf *uv.Buffer, y, width int) uv.Line {
+func extractLine(buf *grid, y, width int) uv.Line {
 	line := make(uv.Line, width)
 	for x := range width {
 		if cell := buf.CellAt(x, y); cell != nil {

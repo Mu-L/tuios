@@ -200,7 +200,7 @@ func (t *GhosttyTerminal) syncLocked() {
 }
 
 // syncRowLocked converts one dirty row into uv cells.
-func (t *GhosttyTerminal) syncRowLocked(buf *uv.Buffer, y int) {
+func (t *GhosttyTerminal) syncRowLocked(buf *grid, y int) {
 	view, err := t.ri.CellsRaw()
 	if err != nil {
 		return

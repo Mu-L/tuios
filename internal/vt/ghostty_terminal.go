@@ -48,7 +48,7 @@ type GhosttyTerminal struct {
 	// guest first enters the alternate screen (see bufAt), so a pane that
 	// never runs a full-screen program does not carry a second grid of
 	// 112-byte cells.
-	bufs   [2]*uv.Buffer
+	bufs   [2]*grid
 	active int
 	// gridStale is set by Write and cleared by syncLocked.
 	gridStale bool
@@ -126,9 +126,9 @@ type GhosttyTerminal struct {
 
 // bufAt returns the shadow buffer for screen idx, making the alternate one on
 // first use. Callers hold mu.
-func (t *GhosttyTerminal) bufAt(idx int) *uv.Buffer {
+func (t *GhosttyTerminal) bufAt(idx int) *grid {
 	if t.bufs[idx] == nil {
-		t.bufs[idx] = uv.NewBuffer(t.width, t.height)
+		t.bufs[idx] = newGrid(t.width, t.height)
 	}
 	return t.bufs[idx]
 }
@@ -178,7 +178,7 @@ func newGhosttyTerminal(w, h, maxLines int) *GhosttyTerminal {
 		cursorStyle:     defaultCursorStyle,
 		cursorSteady:    defaultCursorSteady,
 	}
-	t.bufs[0] = uv.NewBuffer(w, h)
+	t.bufs[0] = newGrid(w, h)
 	// bufs[1] is made by bufAt on the first switch to the alternate screen.
 	t.scrollRegion = uv.Rect(0, 0, w, h)
 	t.dec = newGhosttyCellDecoder()
