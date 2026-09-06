@@ -7,19 +7,41 @@ import (
 	"github.com/Gaurav-Gosain/tuios/internal/app"
 )
 
+// remoteKeyBypassesCopyMode reports whether the key being handled came from a
+// remote sender - tuios send-keys, or a tape run from outside - rather than
+// from the person at this client.
+//
+// Copy mode, implicit or explicit, is that person's viewport: a scrolled view
+// they are reading, or a selection they are making. Their own keystroke ends
+// an implicit session because they have stopped reading, and drives an
+// explicit one because they asked for it. A remote key is neither. It goes
+// where it would go with no copy mode in progress - to the guest, or to the
+// binding it names - and the viewport stays where the person put it. An agent
+// typing into the pane while the person reads its earlier output was one of
+// the things that made scrolling feel random: the view returned to the bottom
+// at a moment decided by another process.
+//
+// The flag is set for the whole run of a remote key sequence or tape and
+// cleared when it is done, on the Update goroutine that dispatches both.
+func remoteKeyBypassesCopyMode(o *app.OS) bool {
+	return o.ProcessingRemoteKeys
+}
+
 // HandleWindowManagementModeKey handles keyboard input in window management mode
 func HandleWindowManagementModeKey(msg tea.KeyPressMsg, o *app.OS) (*app.OS, tea.Cmd) {
 	focusedWindow := o.GetFocusedWindow()
 
 	// A wheel scroll here leaves the pane in an implicit copy mode too, and a
-	// window-manager binding must not be swallowed by it. Any key ends the
-	// scrolled view and is then handled as the window-manager command it is.
-	if focusedWindow != nil && focusedWindow.InImplicitCopyMode() {
+	// window-manager binding must not be swallowed by it. Any key the person
+	// presses ends the scrolled view and is then handled as the window-manager
+	// command it is. A remote key is not the person's: it leaves the view
+	// alone and is handled as the command it is. See remoteKeyBypassesCopyMode.
+	if focusedWindow != nil && focusedWindow.InImplicitCopyMode() && !remoteKeyBypassesCopyMode(o) {
 		focusedWindow.ExitCopyMode()
 	}
 
 	// Handle copy mode (vim-style scrollback/selection) - takes priority
-	if focusedWindow.InCopyMode() {
+	if focusedWindow.InCopyMode() && !remoteKeyBypassesCopyMode(o) {
 		return HandleCopyModeKey(msg, o, focusedWindow)
 	}
 

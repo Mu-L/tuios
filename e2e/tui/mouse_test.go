@@ -276,6 +276,61 @@ func TestTypingWhileScrolledSnapsBackToLiveOutput(t *testing.T) {
 	alive(t, term, "after typing while scrolled")
 }
 
+// TestARemoteSendKeysLeavesAScrolledPaneScrolled is the other half of the
+// bargain above. Typing ends a scrolled view because the person has stopped
+// reading. tuios send-keys goes through the same handler, and used to end it
+// too, so an agent typing into the pane returned the person's view to the
+// bottom at a moment decided by another process. A remote key now goes to the
+// guest and leaves the view where the person put it; the person's own next
+// key still brings the pane back.
+//
+// NEGATIVE CONTROL: measured on the tree before the fix, the pane is back at
+// REMOTE-200-END the moment the first remote key lands.
+func TestARemoteSendKeysLeavesAScrolledPaneScrolled(t *testing.T) {
+	// A daemon session, because send-keys is a verb and needs a daemon to
+	// route it to this client.
+	term, base := start(t, startOpts{args: []string{"new", "remote-keys"}})
+	waitBoot(t, term)
+	newWindow(t, term)
+	enterTerminalMode(t, term)
+
+	fillScrollback(t, term, "REMOTE", 200)
+	col, row := paneCell(t, term)
+
+	wheelAt(t, term, col, row, tuitest.MouseWheelUp, 10)
+	waitScrolledTo(t, term, "REMOTE", "the wheel did not scroll",
+		func(n int) bool { return n > 0 && n <= 190 })
+	before := newestVisible(term.Screen(), "REMOTE")
+
+	// An agent types a command and runs it, key by key, through the client.
+	for _, keys := range [][]string{{"--raw", "echo remote-$((6*7))"}, {"Enter"}} {
+		if out, err := tuiosCLI(t, base, append([]string{"send-keys"}, keys...)...); err != nil {
+			t.Fatalf("send-keys %v: %v\n%s", keys, err, out)
+		}
+	}
+
+	// The view holds through the keys and the output they produced.
+	deadline := time.Now().Add(1500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if n := newestVisible(term.Screen(), "REMOTE"); n != before {
+			t.Fatalf("a remote key moved the view from REMOTE-%d-END to REMOTE-%d-END\n%s", before, n, term.Snapshot())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// The person's own key ends the reading, and the command the agent typed
+	// ran while they read: its output is there at the bottom.
+	if err := term.SendKeys("\r"); err != nil {
+		t.Fatal(err)
+	}
+	waitScrolledTo(t, term, "REMOTE", "the person's key did not return the pane to live output",
+		func(n int) bool { return n == 200 })
+	if err := term.WaitForText("remote-42", uiTimeout); err != nil {
+		t.Fatalf("the remote keys never reached the shell: %v\n%s", err, term.Snapshot())
+	}
+	alive(t, term, "after remote keys while scrolled")
+}
+
 // TestMouseTrackingAppKeepsItsOwnWheel is the regression guard on the thing
 // that already worked and must keep working: vim, less and htop ask for the
 // mouse, and the wheel belongs to them.
